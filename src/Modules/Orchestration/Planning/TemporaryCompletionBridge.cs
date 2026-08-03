@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using Ali.Modules.Orchestration.State;
 using Ali.Modules.Orchestration.Work;
 
 namespace Ali.Modules.Orchestration.Planning;
@@ -62,17 +63,24 @@ internal sealed record TemporaryCompletionFailure(
 
 internal sealed record TemporaryCompletionAttempt(
     ChatResponse? Response,
-    TemporaryCompletionFailure? Failure)
+    TemporaryCompletionFailure? Failure,
+    AliCommittedAnswerDraft? CommittedDraft = null)
 {
     internal bool IsSuccessful => Response is not null && Failure is null;
 
-    internal static TemporaryCompletionAttempt Candidate(ChatResponse response) =>
-        new(response ?? throw new ArgumentNullException(nameof(response)), Failure: null);
+    internal static TemporaryCompletionAttempt Candidate(
+        ChatResponse response,
+        AliCommittedAnswerDraft? committedDraft = null) =>
+        new(
+            response ?? throw new ArgumentNullException(nameof(response)),
+            Failure: null,
+            committedDraft);
 
     internal static TemporaryCompletionAttempt Failed(TemporaryCompletionFailure failure) =>
         new(
             Response: null,
-            Failure: failure ?? throw new ArgumentNullException(nameof(failure)));
+            Failure: failure ?? throw new ArgumentNullException(nameof(failure)),
+            CommittedDraft: null);
 }
 
 internal delegate ValueTask<TemporaryCompletionAttempt> TemporaryCompletionComposerDelegate(
@@ -119,6 +127,7 @@ public sealed class TemporaryCompletionBridge
         if (attempt.Failure is not null)
         {
             if (attempt.Response is not null
+                || attempt.CommittedDraft is not null
                 || string.IsNullOrWhiteSpace(attempt.Failure.UserVisibleMessage))
             {
                 throw new InvalidOperationException(
@@ -134,6 +143,17 @@ public sealed class TemporaryCompletionBridge
         var explicitlyComplete = response.FinishReason == ChatFinishReason.Stop;
         if (explicitlyComplete && !string.IsNullOrWhiteSpace(response.Text))
         {
+            if (attempt.CommittedDraft is { } committed
+                && (!string.Equals(response.Text, committed.Text, StringComparison.Ordinal)
+                    || !string.Equals(
+                        committed.AnswerDigest,
+                        TurnStateIntegrity.Digest(committed.Text),
+                        StringComparison.Ordinal)))
+            {
+                throw new InvalidDataException(
+                    "The completion response does not match its exact committed answer draft.");
+            }
+
             return attempt;
         }
 

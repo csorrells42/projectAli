@@ -212,6 +212,7 @@ internal sealed record WorkGraphConsumerDiagnostics(
 internal sealed partial class AliDurablePlanningTurn :
     IAliPlanningTransitionObserver,
     IAliPlanningEvidenceAuthority,
+    IAliPlanningEvidencePager,
     ICoordinatorActionExecutionAuthority,
     IAsyncDisposable
 {
@@ -239,6 +240,8 @@ internal sealed partial class AliDurablePlanningTurn :
     private readonly List<AcceptedEvidenceProjection> _evidence = [];
     private readonly List<TurnUserResolutionProjection> _userResolutions = [];
     private readonly HashSet<string> _knownEvidenceIds = new(StringComparer.Ordinal);
+    private IReadOnlyList<EvidenceCursorRecord>? _verifiedEvidencePagingSnapshot;
+    private long _verifiedEvidencePagingBoundCursor = -1;
     private ProgressHistory _progressHistory = ProgressHistory.Empty;
     private TurnState _state;
     private WorkGraphSnapshot _workGraph;
@@ -323,6 +326,44 @@ internal sealed partial class AliDurablePlanningTurn :
         try
         {
             return await ResolveEvidenceCoreAsync(evidenceIds, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    async Task<AliPlanningEvidencePage> IAliPlanningEvidencePager.ReadEvidencePageAsync(
+        long afterCursor,
+        long? snapshotCursor,
+        int pageSize,
+        CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        if (afterCursor < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(afterCursor));
+        }
+
+        if (snapshotCursor is < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(snapshotCursor));
+        }
+
+        if (pageSize is < 1 or > 32)
+        {
+            throw new ArgumentOutOfRangeException(nameof(pageSize));
+        }
+
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await ReadEvidencePageCoreAsync(
+                    afterCursor,
+                    snapshotCursor,
+                    pageSize,
+                    cancellationToken)
                 .ConfigureAwait(false);
         }
         finally
@@ -769,6 +810,8 @@ internal sealed partial class AliDurablePlanningTurn :
                 _identity,
                 evidenceDraft,
                 cancellationToken).ConfigureAwait(false);
+            _verifiedEvidencePagingSnapshot = null;
+            _verifiedEvidencePagingBoundCursor = -1;
             var evidenceReference = new CommittedEvidenceReference(
                 evidence.Evidence.EvidenceId,
                 evidence.Cursor,
@@ -1192,6 +1235,124 @@ internal sealed partial class AliDurablePlanningTurn :
         }
 
         return committed.Current;
+    }
+
+    private async Task<AliPlanningEvidencePage> ReadEvidencePageCoreAsync(
+        long afterCursor,
+        long? requestedSnapshotCursor,
+        int pageSize,
+        CancellationToken cancellationToken)
+    {
+        IReadOnlyList<EvidenceCursorRecord> replay;
+        if (requestedSnapshotCursor is { } requested
+            && requested == _verifiedEvidencePagingBoundCursor
+            && _verifiedEvidencePagingSnapshot is { } verified)
+        {
+            replay = verified;
+        }
+        else
+        {
+            replay = await _evidenceLedger.ReplayAsync(_identity, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        var currentCursor = replay.Count == 0 ? 0L : replay[^1].Cursor;
+        var snapshotCursor = requestedSnapshotCursor ?? currentCursor;
+        if (snapshotCursor < afterCursor || snapshotCursor > currentCursor)
+        {
+            return new AliPlanningEvidencePage(
+                afterCursor,
+                snapshotCursor,
+                currentCursor,
+                SnapshotAvailable: false,
+                NextCursor: null,
+                HasMore: false,
+                Items: Array.Empty<AliPlanningEvidencePageItem>());
+        }
+
+        if (!ReferenceEquals(replay, _verifiedEvidencePagingSnapshot)
+            || snapshotCursor != _verifiedEvidencePagingBoundCursor)
+        {
+            _verifiedEvidencePagingSnapshot = Array.AsReadOnly(replay.ToArray());
+            _verifiedEvidencePagingBoundCursor = snapshotCursor;
+            replay = _verifiedEvidencePagingSnapshot;
+        }
+
+        var selected = replay
+            .Where(item => item.Cursor > afterCursor && item.Cursor <= snapshotCursor)
+            .Take(pageSize)
+            .ToArray();
+        if (selected.Length == 0)
+        {
+            if (afterCursor < snapshotCursor)
+            {
+                throw new InvalidDataException(
+                    "The authenticated evidence journal contains a cursor gap.");
+            }
+
+            return new AliPlanningEvidencePage(
+                afterCursor,
+                snapshotCursor,
+                currentCursor,
+                SnapshotAvailable: true,
+                NextCursor: null,
+                HasMore: false,
+                Items: Array.Empty<AliPlanningEvidencePageItem>());
+        }
+
+        var references = selected
+            .Select(item => new CommittedEvidenceReference(
+                item.Evidence.EvidenceId,
+                item.Cursor,
+                item.Checksum))
+            .ToArray();
+        var committed = await _evidenceLedger.ReadCommittedBatchAsync(
+                _identity,
+                references,
+                cancellationToken)
+            .ConfigureAwait(false);
+        var items = new List<AliPlanningEvidencePageItem>(selected.Length);
+        foreach (var cursor in selected)
+        {
+            if (!committed.TryGetValue(cursor.Evidence.EvidenceId, out var exact)
+                || exact.Cursor.Cursor != cursor.Cursor
+                || !string.Equals(exact.Cursor.Checksum, cursor.Checksum, StringComparison.Ordinal))
+            {
+                throw new InvalidDataException(
+                    "The paged evidence projection crossed its authenticated cursor identity.");
+            }
+
+            var identity = exact.ProtectedContent.Identity;
+            items.Add(new AliPlanningEvidencePageItem(
+                cursor.Cursor,
+                cursor.Checksum,
+                ToPlanningEvidenceProjection(exact),
+                identity.CapabilityGroup,
+                identity.ProviderId,
+                identity.RegistryRevision,
+                cursor.Evidence.EffectKind,
+                identity.StableOutcomeCode,
+                identity.FailureCode,
+                Array.AsReadOnly(identity.Artifacts.Select(item => item with { }).ToArray()),
+                cursor.Evidence.Permission with { },
+                identity.Source with { },
+                cursor.Evidence.NoEffectFingerprint,
+                cursor.Evidence.TargetDigest,
+                cursor.Evidence.NormalizedResultDigest,
+                cursor.Evidence.StartedAtUtc,
+                cursor.Evidence.CompletedAtUtc,
+                cursor.Evidence.RecordedAtUtc));
+        }
+
+        var nextCursor = selected[^1].Cursor;
+        return new AliPlanningEvidencePage(
+            afterCursor,
+            snapshotCursor,
+            currentCursor,
+            SnapshotAvailable: true,
+            NextCursor: nextCursor,
+            HasMore: nextCursor < snapshotCursor,
+            Items: items.AsReadOnly());
     }
 
     private async Task<IReadOnlyDictionary<string, AcceptedEvidenceProjection>>
@@ -1730,6 +1891,7 @@ internal sealed partial class AliDurablePlanningTurn :
             ["workGraph"] = workGraph,
             ["evidenceIndex"] = evidenceIndex,
             ["acceptedUserResolutions"] = userResolutionIndex,
+            ["completionCritic"] = BuildCompletionCriticStateProjection(),
             ["pendingActionCount"] = _state.PendingActions.Length,
             ["lastProgressReason"] = _lastProgressReason?.ToString()
         };
@@ -1969,6 +2131,8 @@ internal sealed partial class AliDurablePlanningTurn :
         {
             CallToolAction => PlanningAcceptedActionKind.CallTool,
             ExpandToolsAction => PlanningAcceptedActionKind.ExpandTools,
+            InspectEvidencePageAction => PlanningAcceptedActionKind.InspectEvidencePage,
+            InspectWorkPageAction => PlanningAcceptedActionKind.InspectWorkPage,
             AnswerDirectlyAction => PlanningAcceptedActionKind.AnswerDirectly,
             RequestUserInputAction => PlanningAcceptedActionKind.RequestUserInput,
             AwaitExternalEventAction => PlanningAcceptedActionKind.AwaitExternalEvent,

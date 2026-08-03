@@ -182,6 +182,15 @@ internal static class TurnStateReducer
                 {
                     AnswerPayload = current.FinalPublication.AnswerPayload with { }
                 },
+            CompletionCriticReview = current.CompletionCriticReview is null
+                ? null
+                : current.CompletionCriticReview with
+                {
+                    RenderedPageHashes = current.CompletionCriticReview.RenderedPageHashes.ToArray(),
+                    MaterialUnmetOutcomes = current.CompletionCriticReview
+                        .MaterialUnmetOutcomes
+                        .ToArray()
+                },
             UpdatedAtUtc = recordedAtUtc
         };
 
@@ -322,6 +331,20 @@ internal static class TurnStateReducer
                 // Progress history is append-only journal evidence. The compact turn
                 // snapshot advances its revision/cursor but does not duplicate history.
                 break;
+            case CompletionCriticReviewPreparedTransition preparedReview:
+                next = PrepareCompletionCriticReview(
+                    current,
+                    next,
+                    preparedReview,
+                    nextRevision);
+                break;
+            case CompletionCriticVerdictCommittedTransition criticVerdict:
+                next = CommitCompletionCriticVerdict(
+                    current,
+                    next,
+                    criticVerdict,
+                    nextRevision);
+                break;
             case WorkGraphReferencedTransition workGraph:
                 if (workGraph.WorkGraph.Revision != current.WorkGraphRevision + 1)
                 {
@@ -399,6 +422,101 @@ internal static class TurnStateReducer
 
         next.Validate(identity);
         return next;
+    }
+
+    private static TurnState PrepareCompletionCriticReview(
+        TurnState current,
+        TurnState next,
+        CompletionCriticReviewPreparedTransition prepared,
+        long revision)
+    {
+        if (current.Control is not (TurnControlState.Running or TurnControlState.Paused)
+            || current.PendingActions.Length != 0
+            || current.PendingAcceptedCall is not null
+            || current.InterimPublication is not null
+            || current.FinalPublication is not null)
+        {
+            throw new InvalidDataException(
+                "A completion review can be prepared only from a quiescent active turn before publication.");
+        }
+
+        if (prepared.SourceStateRevision != current.Revision)
+        {
+            throw new InvalidDataException(
+                "A completion review must bind the exact source-state revision it advances.");
+        }
+
+        if (current.CompletionCriticReview is { } existing
+            && string.Equals(
+                existing.ReviewIdentityDigest,
+                prepared.ReviewIdentityDigest,
+                StringComparison.Ordinal))
+        {
+            throw new InvalidDataException(
+                "An identical completion review cannot be prepared more than once.");
+        }
+
+        return next with
+        {
+            CompletionCriticReview = new CompletionCriticReviewPersistenceState(
+                prepared.ReviewIdentityDigest,
+                prepared.SourceStateRevision,
+                prepared.AnswerId,
+                prepared.AnswerDigest,
+                prepared.RenderedPageHashes.ToArray(),
+                prepared.RuntimeDigest,
+                prepared.ModelDigest,
+                prepared.GenerationSettingsDigest,
+                prepared.ReasoningEffort,
+                CompletionCriticReviewPersistenceStatus.Prepared,
+                Complete: null,
+                Basis: null,
+                MaterialUnmetOutcomes: [],
+                PreparedAtRevision: revision,
+                LastTransitionRevision: revision)
+        };
+    }
+
+    private static TurnState CommitCompletionCriticVerdict(
+        TurnState current,
+        TurnState next,
+        CompletionCriticVerdictCommittedTransition verdict,
+        long revision)
+    {
+        var review = current.CompletionCriticReview
+            ?? throw new InvalidDataException(
+                "A completion-critic verdict has no prepared review identity.");
+        if (review.Status != CompletionCriticReviewPersistenceStatus.Prepared
+            || !string.Equals(
+                review.ReviewIdentityDigest,
+                verdict.ReviewIdentityDigest,
+                StringComparison.Ordinal))
+        {
+            throw new InvalidDataException(
+                "A completion-critic verdict can commit only to its exact prepared identity.");
+        }
+
+        if (current.Control is not (TurnControlState.Running or TurnControlState.Paused)
+            || current.PendingActions.Length != 0
+            || current.PendingAcceptedCall is not null
+            || current.InterimPublication is not null
+            || current.FinalPublication is not null)
+        {
+            throw new InvalidDataException(
+                "A completion-critic verdict cannot commit after execution or publication state changed.");
+        }
+
+        return next with
+        {
+            CompletionCriticReview = review with
+            {
+                Status = CompletionCriticReviewPersistenceStatus.Committed,
+                Complete = verdict.Complete,
+                Basis = verdict.Basis,
+                MaterialUnmetOutcomes = verdict.MaterialUnmetOutcomes.ToArray(),
+                LastTransitionRevision = revision
+            }
+        };
     }
 
     private static TurnState RevalidateRuntimeBindings(

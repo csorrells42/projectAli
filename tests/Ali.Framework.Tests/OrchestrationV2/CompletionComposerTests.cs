@@ -23,13 +23,13 @@ public sealed class CompletionComposerTests
     };
 
     [Fact]
-    public async Task OversizedCompletionDossier_MakesZeroComposerCalls()
+    public async Task OversizedCompletionDossier_IsFullyPagedWithoutChangingConfiguredLimits()
     {
-        var client = new RecordingChatClient(CompleteResponse("must not run"));
+        var client = new AutoCompositionChatClient();
         var profile = PlanningTestModelProfile.GptOss65K() with
         {
-            ContextTokens = 1_024,
-            OutputTokenLimit = 256
+            ContextTokens = 4_096,
+            OutputTokenLimit = 512
         };
         var bindings = Bindings("accepted");
         var composer = Composer(
@@ -40,24 +40,43 @@ public sealed class CompletionComposerTests
         var bridge = TemporaryCompletionBridge.FromComposer(composer.ComposeAsync);
 
         var attempt = await bridge.CompleteAsync(
-            Request(string.Concat(Enumerable.Repeat("exact dossier material ", 20_000))),
+            Request(string.Concat(Enumerable.Repeat("exact dossier material ", 4_000))),
             TestContext.Current.CancellationToken);
 
-        Assert.Equal(0, client.CallCount);
-        var failure = Assert.IsType<TemporaryCompletionFailure>(attempt.Failure);
+        Assert.True(attempt.IsSuccessful);
+        var committed = Assert.IsType<AliCommittedAnswerDraft>(attempt.CommittedDraft);
+        Assert.True(committed.Segments.Count > 1);
+        Assert.Equal(committed.Text, attempt.Response!.Text);
+        Assert.Equal(profile.OutputTokenLimit, client.Requests[0].Options!.MaxOutputTokens);
+        var protocol = AliAnswerCompositionProtocol.CreateDeclaration();
+        foreach (var request in client.Requests)
+        {
+            var charge = AliModelAwarePlanningInputCounter.Instance.Count(
+                profile,
+                request.Messages,
+                selectedTools: [],
+                protocol);
+            Assert.True(charge.CanSafelyCharge);
+            Assert.True(
+                charge.ChargedTokens <= profile.ContextTokens - profile.OutputTokenLimit,
+                $"Composition prompt charged {charge.ChargedTokens} tokens against a "
+                + $"{profile.ContextTokens - profile.OutputTokenLimit} token input budget.");
+        }
+
+        var projected = client.Requests
+            .Select(request => ParseCompositionInput(request.Messages))
+            .Select(root => root.GetProperty("projectionPage").GetProperty("text").GetString())
+            .Where(static text => !string.IsNullOrEmpty(text));
         Assert.Equal(
-            TemporaryCompletionFailureKind.CompletionInputNotAdmitted,
-            failure.Kind);
-        Assert.Contains("No composer call ran", failure.UserVisibleMessage, StringComparison.Ordinal);
-        Assert.Contains("no completion input was truncated", failure.UserVisibleMessage, StringComparison.OrdinalIgnoreCase);
-        Assert.Null(attempt.Response);
+            AliCompletionProjectionPager.BuildSource(
+                Request(string.Concat(Enumerable.Repeat("exact dossier material ", 4_000)))),
+            string.Concat(projected));
     }
 
     [Fact]
-    public async Task CompletionAdmission_ChargesExactNoToolNoProtocolEnvelopeAndDispatchesItOnce()
+    public async Task ShortAnswer_CommitsOneSegmentAndThenFinishesThroughOnlyCompositionProtocol()
     {
-        var response = CompleteResponse("Completed exactly.");
-        var client = new RecordingChatClient(response);
+        var client = new AutoCompositionChatClient(firstSegmentText: "Completed exactly.");
         var counter = new RecordingCounter();
         var profile = PlanningTestModelProfile.GptOss65K() with
         {
@@ -78,21 +97,22 @@ public sealed class CompletionComposerTests
             TestContext.Current.CancellationToken);
 
         Assert.True(attempt.IsSuccessful);
-        Assert.Same(response, attempt.Response);
-        Assert.Equal(1, counter.CallCount);
+        Assert.Equal("Completed exactly.", attempt.Response!.Text);
+        var committed = Assert.IsType<AliCommittedAnswerDraft>(attempt.CommittedDraft);
+        Assert.Single(committed.Segments);
+        Assert.Equal(2, counter.CallCount);
         Assert.Empty(counter.SelectedTools!);
-        Assert.Null(counter.Protocol);
-        Assert.Equal(1, client.CallCount);
-        Assert.Same(counter.Messages, client.RawMessages);
-        var exactMessages = Assert.IsAssignableFrom<IReadOnlyList<MeaiChatMessage>>(
-            client.RawMessages);
+        Assert.Equal(AliAnswerCompositionProtocol.ToolName, counter.Protocol!.Name);
+        Assert.Equal(2, client.CallCount);
+        var exactMessages = client.Requests[0].Messages;
         Assert.Equal(2, exactMessages.Count);
         Assert.Equal(MeaiChatRole.System, exactMessages[0].Role);
         Assert.Equal(MeaiChatRole.User, exactMessages[1].Role);
 
-        var options = Assert.IsType<ChatOptions>(client.Options);
-        Assert.Empty(options.Tools!);
-        Assert.Equal(ChatToolMode.None, options.ToolMode);
+        var options = Assert.IsType<ChatOptions>(client.Requests[0].Options);
+        Assert.Equal(
+            AliAnswerCompositionProtocol.ToolName,
+            Assert.IsAssignableFrom<AIFunctionDeclaration>(Assert.Single(options.Tools!)).Name);
         Assert.Equal(profile.OutputTokenLimit, options.MaxOutputTokens);
         Assert.True(Assert.IsType<bool>(options.AdditionalProperties![
             AliInternalModelRoutingProperties.SuppressInjectedPersona]));
@@ -127,7 +147,12 @@ public sealed class CompletionComposerTests
 
         var messages = AliCompletionComposer.BuildMessages(request);
 
-        using var dossier = JsonDocument.Parse(messages[1].Text!);
+        using var composition = JsonDocument.Parse(messages[1].Text!);
+        using var dossier = JsonDocument.Parse(
+            composition.RootElement
+                .GetProperty("projectionPage")
+                .GetProperty("text")
+                .GetString()!);
         var evidence = Assert.Single(
             dossier.RootElement.GetProperty("citedAcceptedEvidence").EnumerateArray());
         Assert.Equal("evidence-1", evidence.GetProperty("evidenceId").GetString());
@@ -281,7 +306,7 @@ public sealed class CompletionComposerTests
             Request("Return a complete answer."),
             TestContext.Current.CancellationToken);
 
-        Assert.Equal(1, client.CallCount);
+        Assert.Equal(2, client.CallCount);
         var failure = Assert.IsType<TemporaryCompletionFailure>(attempt.Failure);
         Assert.Equal(
             TemporaryCompletionFailureKind.CompletionOutputIncomplete,
@@ -291,16 +316,19 @@ public sealed class CompletionComposerTests
     }
 
     [Fact]
-    public async Task ExplicitLengthFinish_DiscardsPartialOutputAndNeverReturnsSuccess()
+    public async Task ExplicitLengthFinish_DiscardsPartialOutputAndRegeneratesFromCommittedCursor()
     {
         const string partialCanary = "PARTIAL_OUTPUT_MUST_NOT_BE_JOURNALED";
-        var response = new ChatResponse(new MeaiChatMessage(
-            MeaiChatRole.Assistant,
-            partialCanary))
-        {
-            FinishReason = ChatFinishReason.Length
-        };
-        var client = new RecordingChatClient(response);
+        var client = new AutoCompositionChatClient(
+            firstSegmentText: "complete segment",
+            responseOverride: (index, _) => index == 0
+                ? new ChatResponse(new MeaiChatMessage(
+                    MeaiChatRole.Assistant,
+                    partialCanary))
+                {
+                    FinishReason = ChatFinishReason.Length
+                }
+                : null);
         var bindings = Bindings("accepted");
         var composer = Composer(
             Snapshot(client, PlanningTestModelProfile.GptOss65K()),
@@ -313,14 +341,152 @@ public sealed class CompletionComposerTests
             Request("Return a complete answer."),
             TestContext.Current.CancellationToken);
 
-        Assert.Equal(1, client.CallCount);
-        Assert.Null(attempt.Response);
-        var failure = Assert.IsType<TemporaryCompletionFailure>(attempt.Failure);
+        Assert.True(attempt.IsSuccessful);
+        Assert.Equal("complete segment", attempt.Response!.Text);
+        Assert.DoesNotContain(partialCanary, attempt.Response.Text, StringComparison.Ordinal);
+        Assert.Equal(3, client.CallCount);
+        var clippedInput = ParseCompositionInput(client.Requests[0].Messages);
+        var regeneratedInput = ParseCompositionInput(client.Requests[1].Messages);
+        Assert.Equal(
+            clippedInput.GetProperty("nextSequence").GetInt32(),
+            regeneratedInput.GetProperty("nextSequence").GetInt32());
+        Assert.Equal(
+            clippedInput.GetProperty("previousSegmentHash").GetString(),
+            regeneratedInput.GetProperty("previousSegmentHash").GetString());
+        Assert.Equal(
+            clippedInput.GetProperty("projectionPage").GetProperty("cursor").GetInt64(),
+            regeneratedInput.GetProperty("projectionPage").GetProperty("cursor").GetInt64());
+    }
+
+    [Fact]
+    public async Task MalformedEnvelope_IsDiscardedAndRegeneratedFromCommittedCursor()
+    {
+        var client = new AutoCompositionChatClient(
+            firstSegmentText: "valid replacement",
+            responseOverride: (index, _) => index == 0
+                ? CompleteResponse("{not-valid-composition-json")
+                : null);
+        var bindings = Bindings("accepted");
+        var composer = Composer(
+            Snapshot(client, PlanningTestModelProfile.GptOss65K()),
+            bindings,
+            (revision, _, _) => ValueTask.FromResult(
+                new AliCompletionDispatchAuthorization(true, revision)));
+        var bridge = TemporaryCompletionBridge.FromComposer(composer.ComposeAsync);
+
+        var attempt = await bridge.CompleteAsync(
+            Request("Return a complete answer."),
+            TestContext.Current.CancellationToken);
+
+        Assert.True(attempt.IsSuccessful);
+        Assert.Equal("valid replacement", attempt.Response!.Text);
+        Assert.Equal(3, client.CallCount);
+        var malformedInput = ParseCompositionInput(client.Requests[0].Messages);
+        var regeneratedInput = ParseCompositionInput(client.Requests[1].Messages);
+        Assert.Equal(
+            malformedInput.GetProperty("nextSequence").GetInt32(),
+            regeneratedInput.GetProperty("nextSequence").GetInt32());
+        Assert.Equal(
+            malformedInput.GetProperty("projectionPage").GetProperty("pageDigest").GetString(),
+            regeneratedInput.GetProperty("projectionPage").GetProperty("pageDigest").GetString());
+        Assert.NotNull(client.Requests[0].Options!.Tools);
+        Assert.Null(client.Requests[1].Options!.Tools);
+        Assert.NotNull(client.Requests[1].Options!.ResponseFormat);
+    }
+
+    [Fact]
+    public async Task RepeatedInvalidJsonAtUnchangedMaterialState_BecomesTypedPause()
+    {
+        var client = new AutoCompositionChatClient(
+            responseOverride: (_, _) => CompleteResponse("{not-valid-composition-json"));
+        var bindings = Bindings("accepted");
+        var composer = Composer(
+            Snapshot(client, PlanningTestModelProfile.GptOss65K()),
+            bindings,
+            (revision, _, _) => ValueTask.FromResult(
+                new AliCompletionDispatchAuthorization(true, revision)));
+        var bridge = TemporaryCompletionBridge.FromComposer(composer.ComposeAsync);
+
+        var attempt = await bridge.CompleteAsync(
+            Request("Return a complete answer."),
+            TestContext.Current.CancellationToken);
+
+        Assert.False(attempt.IsSuccessful);
+        Assert.Equal(3, client.CallCount);
+        Assert.NotNull(client.Requests[0].Options!.Tools);
+        Assert.All(client.Requests.Skip(1), request => Assert.Null(request.Options!.Tools));
         Assert.Equal(
             TemporaryCompletionFailureKind.CompletionOutputIncomplete,
-            failure.Kind);
-        Assert.DoesNotContain(partialCanary, failure.UserVisibleMessage, StringComparison.Ordinal);
-        Assert.Contains("partial composer output was discarded", failure.UserVisibleMessage, StringComparison.Ordinal);
+            Assert.IsType<TemporaryCompletionFailure>(attempt.Failure).Kind);
+    }
+
+    [Fact]
+    public async Task LaterTransportFailure_ReportsInMemorySegmentsWereDiscarded()
+    {
+        var client = new AutoCompositionChatClient(
+            firstSegmentText: "accepted only in this attempt",
+            responseOverride: (index, input) => index switch
+            {
+                0 => NativeAppend(input, "accepted only in this attempt"),
+                _ => throw new HttpRequestException("SECRET_LATER_TRANSPORT_DETAIL")
+            });
+        var bindings = Bindings("accepted");
+        var composer = Composer(
+            Snapshot(client, PlanningTestModelProfile.GptOss65K()),
+            bindings,
+            (revision, _, _) => ValueTask.FromResult(
+                new AliCompletionDispatchAuthorization(true, revision)));
+        var bridge = TemporaryCompletionBridge.FromComposer(composer.ComposeAsync);
+
+        var attempt = await bridge.CompleteAsync(
+            Request("Return a complete answer."),
+            TestContext.Current.CancellationToken);
+
+        Assert.False(attempt.IsSuccessful);
+        Assert.Equal(3, client.CallCount);
+        Assert.Null(attempt.CommittedDraft);
+        var failure = Assert.IsType<TemporaryCompletionFailure>(attempt.Failure);
+        Assert.Contains("1 complete answer segment(s)", failure.UserVisibleMessage, StringComparison.Ordinal);
+        Assert.Contains("held only in memory and were discarded", failure.UserVisibleMessage, StringComparison.Ordinal);
+        Assert.Contains("explicit resume will recompose", failure.UserVisibleMessage, StringComparison.Ordinal);
+        Assert.DoesNotContain("SECRET_LATER_TRANSPORT_DETAIL", failure.UserVisibleMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FinishBeforeClaimCoverage_IsRejectedUntilACommittedSegmentCoversClaim()
+    {
+        var client = new AutoCompositionChatClient(
+            firstSegmentText: "unused",
+            responseOverride: (index, input) => index switch
+            {
+                0 => NativeAppend(input, "first segment", coveredClaimIds: []),
+                1 => NativeFinish(input),
+                _ => null
+            });
+        var bindings = Bindings("accepted");
+        var composer = Composer(
+            Snapshot(client, PlanningTestModelProfile.GptOss65K()),
+            bindings,
+            (revision, _, _) => ValueTask.FromResult(
+                new AliCompletionDispatchAuthorization(true, revision)));
+        var bridge = TemporaryCompletionBridge.FromComposer(composer.ComposeAsync);
+
+        var attempt = await bridge.CompleteAsync(
+            RequestWithClaim("Return the accepted claim."),
+            TestContext.Current.CancellationToken);
+
+        Assert.True(attempt.IsSuccessful);
+        var committed = Assert.IsType<AliCommittedAnswerDraft>(attempt.CommittedDraft);
+        Assert.Equal(["claim-1"], committed.CoveredClaimIds);
+        Assert.Equal(4, client.CallCount);
+        var prematureFinish = ParseCompositionInput(client.Requests[1].Messages);
+        var repaired = ParseCompositionInput(client.Requests[2].Messages);
+        Assert.Equal(
+            prematureFinish.GetProperty("nextSequence").GetInt32(),
+            repaired.GetProperty("nextSequence").GetInt32());
+        Assert.Equal(
+            prematureFinish.GetProperty("previousSegmentHash").GetString(),
+            repaired.GetProperty("previousSegmentHash").GetString());
     }
 
     [Theory]
@@ -541,6 +707,34 @@ public sealed class CompletionComposerTests
             citedEvidence: []);
     }
 
+    private static TemporaryCompletionRequest RequestWithClaim(string immutableRequest)
+    {
+        var claim = new OrchestrationMaterialClaim(
+            "claim-1",
+            "The answer includes the accepted result.",
+            MaterialClaimKind.Completion,
+            evidenceIds: []);
+        var plan = new CompletionPlan(
+            "answer-1",
+            CompletionKind.Succeeded,
+            requiredOutcomeIds: [],
+            requiredClaimIds: [claim.ClaimId],
+            bindings: [],
+            requestedFormat: "concise");
+        var decision = new OrchestrationDecision(
+            workUpdate: null,
+            materialClaims: [claim],
+            nextAction: new BeginCompletionAction(plan));
+        return new TemporaryCompletionRequest(
+            immutableRequest,
+            new AliPlanningTurnInput(11, "{\"status\":\"accepted\"}"),
+            decision,
+            new ChatResponse(new MeaiChatMessage(MeaiChatRole.Assistant, "accepted")),
+            requiredOutcomes: [],
+            requiredClaims: [claim],
+            citedEvidence: []);
+    }
+
     private static TurnRuntimeBindings Bindings(string suffix)
     {
         string Digest(string name) =>
@@ -562,6 +756,148 @@ public sealed class CompletionComposerTests
         {
             FinishReason = ChatFinishReason.Stop
         };
+
+    private static JsonElement ParseCompositionInput(
+        IReadOnlyList<MeaiChatMessage> messages)
+    {
+        using var document = JsonDocument.Parse(messages[^1].Text!);
+        return document.RootElement.Clone();
+    }
+
+    private static ChatResponse NativeAppend(
+        JsonElement input,
+        string text,
+        IReadOnlyList<string>? coveredClaimIds = null)
+    {
+        var message = new MeaiChatMessage(MeaiChatRole.Assistant, string.Empty);
+        message.Contents.Add(new FunctionCallContent(
+            "composition-call-" + Guid.NewGuid().ToString("N"),
+            AliAnswerCompositionProtocol.ToolName,
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["kind"] = "appendSegment",
+                ["answerId"] = input.GetProperty("answerId").GetString(),
+                ["sequence"] = input.GetProperty("nextSequence").GetInt32(),
+                ["previousSegmentHash"] = input.GetProperty("previousSegmentHash").GetString(),
+                ["text"] = text,
+                ["coveredClaimIds"] = coveredClaimIds?.ToArray() ?? []
+            }));
+        return new ChatResponse(message) { FinishReason = ChatFinishReason.ToolCalls };
+    }
+
+    private static ChatResponse NativeFinish(JsonElement input)
+    {
+        var message = new MeaiChatMessage(MeaiChatRole.Assistant, string.Empty);
+        message.Contents.Add(new FunctionCallContent(
+            "composition-call-" + Guid.NewGuid().ToString("N"),
+            AliAnswerCompositionProtocol.ToolName,
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["kind"] = "finishAnswer",
+                ["answerId"] = input.GetProperty("answerId").GetString()
+            }));
+        return new ChatResponse(message) { FinishReason = ChatFinishReason.ToolCalls };
+    }
+
+    private static ChatResponse CompatibilityAppend(
+        JsonElement input,
+        string text,
+        IReadOnlyList<string>? coveredClaimIds = null) =>
+        CompleteResponse(JsonSerializer.Serialize(new
+        {
+            kind = "appendSegment",
+            answerId = input.GetProperty("answerId").GetString(),
+            sequence = input.GetProperty("nextSequence").GetInt32(),
+            previousSegmentHash = input.GetProperty("previousSegmentHash").GetString(),
+            text,
+            coveredClaimIds = coveredClaimIds?.ToArray() ?? []
+        }));
+
+    private static ChatResponse CompatibilityFinish(JsonElement input) =>
+        CompleteResponse(JsonSerializer.Serialize(new
+        {
+            kind = "finishAnswer",
+            answerId = input.GetProperty("answerId").GetString()
+        }));
+
+    private sealed record RecordedCompositionRequest(
+        IReadOnlyList<MeaiChatMessage> Messages,
+        ChatOptions? Options);
+
+    private sealed class AutoCompositionChatClient : IChatClient
+    {
+        private readonly string _firstSegmentText;
+        private readonly Func<int, JsonElement, ChatResponse?>? _override;
+
+        internal AutoCompositionChatClient(
+            string firstSegmentText = "segment-0",
+            Func<int, JsonElement, ChatResponse?>? responseOverride = null)
+        {
+            _firstSegmentText = firstSegmentText;
+            _override = responseOverride;
+        }
+
+        internal List<RecordedCompositionRequest> Requests { get; } = [];
+
+        internal int CallCount => Requests.Count;
+
+        public Task<ChatResponse> GetResponseAsync(
+            IEnumerable<MeaiChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            var exactMessages = messages.ToArray();
+            var input = ParseCompositionInput(exactMessages);
+            var index = Requests.Count;
+            Requests.Add(new RecordedCompositionRequest(
+                Array.AsReadOnly(exactMessages),
+                options));
+            var overridden = _override?.Invoke(index, input);
+            if (overridden is not null)
+            {
+                return Task.FromResult(overridden);
+            }
+
+            var pageText = input.GetProperty("projectionPage").GetProperty("text").GetString();
+            var nextClaims = input.GetProperty("requiredClaimCoverage")
+                .GetProperty("nextIds")
+                .EnumerateArray()
+                .Select(static value => value.GetString()!)
+                .ToArray();
+            var useNativeProtocol = options?.Tools is { Count: > 0 };
+            if (!string.IsNullOrEmpty(pageText) || nextClaims.Length > 0)
+            {
+                var sequence = input.GetProperty("nextSequence").GetInt32();
+                var text = sequence == 0 ? _firstSegmentText : $" segment-{sequence}";
+                return Task.FromResult(useNativeProtocol
+                    ? NativeAppend(input, text, nextClaims)
+                    : CompatibilityAppend(input, text, nextClaims));
+            }
+
+            return Task.FromResult(useNativeProtocol
+                ? NativeFinish(input)
+                : CompatibilityFinish(input));
+        }
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<MeaiChatMessage> messages,
+            ChatOptions? options = null,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            var exact = await GetResponseAsync(messages, options, cancellationToken);
+            foreach (var update in exact.ToChatResponseUpdates())
+            {
+                yield return update;
+            }
+        }
+
+        public object? GetService(Type serviceType, object? serviceKey = null) =>
+            serviceKey is null && serviceType.IsInstanceOfType(this) ? this : null;
+
+        public void Dispose()
+        {
+        }
+    }
 
     private sealed class RecordingCounter : IAliPlanningInputCounter
     {

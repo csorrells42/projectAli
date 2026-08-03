@@ -168,6 +168,8 @@ public static class AliOrchestrationDecisionDecoder
         {
             "callTool" => DecodeCallTool(element),
             "expandTools" => DecodeExpandTools(element),
+            "inspectEvidencePage" => DecodeInspectEvidencePage(element),
+            "inspectWorkPage" => DecodeInspectWorkPage(element),
             "answerDirectly" => DecodeAnswerDirectly(element),
             "requestUserInput" => DecodeRequestUserInput(element),
             "awaitExternalEvent" => DecodeAwaitExternalEvent(element),
@@ -198,6 +200,42 @@ public static class AliOrchestrationDecisionDecoder
     {
         RequireExactProperties(element, "nextAction", "kind", "need");
         return new ExpandToolsAction(RequireString(element, "need", "nextAction"));
+    }
+
+    private static InspectEvidencePageAction DecodeInspectEvidencePage(JsonElement element)
+    {
+        RequireExactProperties(
+            element,
+            "nextAction",
+            "kind",
+            "afterCursor",
+            "snapshotCursor",
+            "pageSize");
+        return new InspectEvidencePageAction(
+            RequireInt64(RequireProperty(element, "afterCursor", "nextAction"), "nextAction.afterCursor"),
+            ReadNullableInt64(
+                RequireProperty(element, "snapshotCursor", "nextAction"),
+                "nextAction.snapshotCursor"),
+            RequireInt32(RequireProperty(element, "pageSize", "nextAction"), "nextAction.pageSize"));
+    }
+
+    private static InspectWorkPageAction DecodeInspectWorkPage(JsonElement element)
+    {
+        RequireExactProperties(
+            element,
+            "nextAction",
+            "kind",
+            "afterWorkItemId",
+            "snapshotRevision",
+            "pageSize");
+        return new InspectWorkPageAction(
+            ReadNullableString(
+                RequireProperty(element, "afterWorkItemId", "nextAction"),
+                "nextAction.afterWorkItemId"),
+            ReadNullableInt64(
+                RequireProperty(element, "snapshotRevision", "nextAction"),
+                "nextAction.snapshotRevision"),
+            RequireInt32(RequireProperty(element, "pageSize", "nextAction"), "nextAction.pageSize"));
     }
 
     private static AnswerDirectlyAction DecodeAnswerDirectly(JsonElement element)
@@ -333,6 +371,11 @@ public static class AliOrchestrationDecisionDecoder
         return element.GetString();
     }
 
+    private static long? ReadNullableInt64(JsonElement element, string path) =>
+        element.ValueKind == JsonValueKind.Null
+            ? null
+            : RequireInt64(element, path);
+
     private static string RequireString(JsonElement parent, string propertyName, string parentPath)
     {
         var element = RequireProperty(parent, propertyName, parentPath);
@@ -349,6 +392,16 @@ public static class AliOrchestrationDecisionDecoder
         if (element.ValueKind != JsonValueKind.Number || !element.TryGetInt64(out var value))
         {
             throw new DecisionDecodeException($"{path} must be a 64-bit integer.");
+        }
+
+        return value;
+    }
+
+    private static int RequireInt32(JsonElement element, string path)
+    {
+        if (element.ValueKind != JsonValueKind.Number || !element.TryGetInt32(out var value))
+        {
+            throw new DecisionDecodeException($"{path} must be a 32-bit integer.");
         }
 
         return value;

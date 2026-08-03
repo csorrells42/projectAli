@@ -41,6 +41,32 @@ public static class AliOrchestrationProtocol
                 ["need"] = BoundedString(1, 2_000)
             }));
         actionBranches.Add(ObjectSchema(
+            ["kind", "afterCursor", "snapshotCursor", "pageSize"],
+            new Dictionary<string, object?>
+            {
+                ["kind"] = ConstString("inspectEvidencePage"),
+                ["afterCursor"] = Describe(
+                    NonnegativeIntegerSchema(),
+                    "Use 0 for the first page; for continuation use the prior page's nextCursor."),
+                ["snapshotCursor"] = Describe(
+                    NullableNonnegativeIntegerSchema(),
+                    "Use null only for the first page; every continuation must reuse the prior page's snapshotCursor."),
+                ["pageSize"] = PageSizeSchema()
+            }));
+        actionBranches.Add(ObjectSchema(
+            ["kind", "afterWorkItemId", "snapshotRevision", "pageSize"],
+            new Dictionary<string, object?>
+            {
+                ["kind"] = ConstString("inspectWorkPage"),
+                ["afterWorkItemId"] = Describe(
+                    NullableIdentifierSchema(),
+                    "Use null for the first page; for continuation reuse the prior page's nextWorkItemId."),
+                ["snapshotRevision"] = Describe(
+                    NullableNonnegativeIntegerSchema(),
+                    "Use null only for the first page; every continuation must reuse the prior page's snapshotRevision."),
+                ["pageSize"] = PageSizeSchema()
+            }));
+        actionBranches.Add(ObjectSchema(
             ["kind", "answer"],
             new Dictionary<string, object?>
             {
@@ -271,6 +297,39 @@ public static class AliOrchestrationProtocol
         };
 
     private static Dictionary<string, object?> IdentifierSchema() => BoundedString(1, 256);
+
+    private static Dictionary<string, object?> Describe(
+        Dictionary<string, object?> schema,
+        string description)
+    {
+        schema["description"] = description;
+        return schema;
+    }
+
+    private static Dictionary<string, object?> NonnegativeIntegerSchema() =>
+        new()
+        {
+            ["type"] = "integer",
+            ["minimum"] = 0
+        };
+
+    private static Dictionary<string, object?> NullableNonnegativeIntegerSchema() =>
+        new()
+        {
+            ["oneOf"] = new object[]
+            {
+                new Dictionary<string, object?> { ["type"] = "null" },
+                NonnegativeIntegerSchema()
+            }
+        };
+
+    private static Dictionary<string, object?> PageSizeSchema() =>
+        new()
+        {
+            ["type"] = "integer",
+            ["minimum"] = 1,
+            ["maximum"] = 32
+        };
 
     private static Dictionary<string, object?> NullableIdentifierSchema() =>
         new()

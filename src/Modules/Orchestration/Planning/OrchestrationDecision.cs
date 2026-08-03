@@ -186,6 +186,40 @@ public sealed record ExpandToolsAction : OrchestrationNextAction
     public string Need { get; }
 }
 
+public sealed record InspectEvidencePageAction : OrchestrationNextAction
+{
+    public InspectEvidencePageAction(long afterCursor, long? snapshotCursor, int pageSize)
+    {
+        AfterCursor = afterCursor;
+        SnapshotCursor = snapshotCursor;
+        PageSize = pageSize;
+    }
+
+    public long AfterCursor { get; }
+
+    public long? SnapshotCursor { get; }
+
+    public int PageSize { get; }
+}
+
+public sealed record InspectWorkPageAction : OrchestrationNextAction
+{
+    public InspectWorkPageAction(string? afterWorkItemId, long? snapshotRevision, int pageSize)
+    {
+        AfterWorkItemId = string.IsNullOrWhiteSpace(afterWorkItemId)
+            ? null
+            : afterWorkItemId;
+        SnapshotRevision = snapshotRevision;
+        PageSize = pageSize;
+    }
+
+    public string? AfterWorkItemId { get; }
+
+    public long? SnapshotRevision { get; }
+
+    public int PageSize { get; }
+}
+
 public sealed record AnswerDirectlyAction : OrchestrationNextAction
 {
     public AnswerDirectlyAction(string answer)

@@ -12,6 +12,7 @@ using Ali.Modules.WorkstationFiles;
 using Ali.Modules.Identity;
 using Ali.Modules.Mcp;
 using Ali.Modules.Orchestration;
+using Ali.Modules.Orchestration.Completion;
 using Ali.Modules.Orchestration.Contracts;
 using Ali.Modules.Orchestration.Evidence;
 using Ali.Modules.Orchestration.Observation;
@@ -1011,6 +1012,10 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             CaptureBoundModelDispatch,
             dispatchBindingsFactory,
             durableTurn.AuthorizeCompletionDispatchAsync);
+        var completionCritic = new AliCompletionCritic(
+            CaptureBoundModelDispatch,
+            dispatchBindingsFactory,
+            durableTurn.AuthorizeCompletionDispatchAsync);
         using var planningClient = new AliOrchestrationPlanningClient(
             _modelClient,
             () => _runtime.ActiveProfile.SupportsToolCalls,
@@ -1023,7 +1028,8 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             finalAnswerRenderer: static (activeTurn, answer) =>
                 FinalAnswerRenderer.Compose(answer, activeTurn.WebSources),
             boundDispatchAccessor: CaptureBoundModelDispatch,
-            dispatchBindingsFactory: dispatchBindingsFactory);
+            dispatchBindingsFactory: dispatchBindingsFactory,
+            completionCritic: completionCritic);
         using var planningTurnScope = planningClient.BeginTurn(
             turn,
             durableTurn.Input,

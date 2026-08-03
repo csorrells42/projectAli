@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using Ali.Modules.Capabilities;
 using Ali.Modules.Coordinator;
+using Ali.Modules.Orchestration.Completion;
 using Ali.Modules.Orchestration.Contracts;
 using Ali.Modules.Orchestration.Evidence;
 using Ali.Modules.Orchestration.State;
@@ -36,10 +37,12 @@ internal sealed class AliOrchestrationPlanningClient : IChatClient
     private readonly Func<BoundModelDispatchSnapshot>? _boundDispatchAccessor;
     private readonly Func<BoundModelDispatchSnapshot, TurnRuntimeBindings>? _dispatchBindingsFactory;
     private readonly AliPlanningInputAdmission _inputAdmission;
+    private readonly AliPlanningContextProjector _contextProjector;
     private readonly ISemanticToolCatalog _semanticToolCatalog;
     private readonly AliStateBackedChatHistoryAdapter _historyAdapter;
     private readonly OrchestrationDecisionValidator _validator;
     private readonly TemporaryCompletionBridge? _completionBridge;
+    private readonly AliCompletionCritic? _completionCritic;
     private readonly Func<string, Dictionary<string, object?>, Dictionary<string, object?>> _toolArgumentNormalizer;
     private readonly Func<AliCompletedToolOutcomeRequest, PlanningToolDomainOutcome>?
         _completedToolOutcomeClassifier;
@@ -61,7 +64,9 @@ internal sealed class AliOrchestrationPlanningClient : IChatClient
         Func<CoordinatorTurnContext, string, string>? finalAnswerRenderer = null,
         AliPlanningInputAdmission? inputAdmission = null,
         Func<BoundModelDispatchSnapshot>? boundDispatchAccessor = null,
-        Func<BoundModelDispatchSnapshot, TurnRuntimeBindings>? dispatchBindingsFactory = null)
+        Func<BoundModelDispatchSnapshot, TurnRuntimeBindings>? dispatchBindingsFactory = null,
+        AliPlanningContextProjector? contextProjector = null,
+        AliCompletionCritic? completionCritic = null)
     {
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
         _supportsNativeToolCalls = supportsNativeToolCalls
@@ -79,8 +84,11 @@ internal sealed class AliOrchestrationPlanningClient : IChatClient
         _inputAdmission = inputAdmission ?? new AliPlanningInputAdmission();
         _semanticToolCatalog = semanticToolCatalog ?? new RegistryOnlySemanticToolCatalog();
         _historyAdapter = historyAdapter ?? new AliStateBackedChatHistoryAdapter();
+        _contextProjector = contextProjector
+            ?? new AliPlanningContextProjector(_historyAdapter, _inputAdmission);
         _validator = validator ?? new OrchestrationDecisionValidator();
         _completionBridge = completionBridge;
+        _completionCritic = completionCritic;
         _toolArgumentNormalizer = toolArgumentNormalizer ?? ((_, arguments) => arguments);
         _completedToolOutcomeClassifier = completedToolOutcomeClassifier;
         _finalAnswerRenderer = finalAnswerRenderer ?? ((_, answer) => answer);
@@ -150,6 +158,7 @@ internal sealed class AliOrchestrationPlanningClient : IChatClient
             var invalidDraftCount = 0;
             var compatibilityFailureFingerprints = new HashSet<string>(StringComparer.Ordinal);
             var unchangedExpansionFingerprints = new HashSet<string>(StringComparer.Ordinal);
+            var seenPagingFingerprints = new HashSet<string>(StringComparer.Ordinal);
             var unchangedBlockedActionFingerprints = new HashSet<string>(StringComparer.Ordinal);
 
             while (true)
@@ -204,26 +213,25 @@ internal sealed class AliOrchestrationPlanningClient : IChatClient
                 var useNative = allowNativeProtocol && dispatch.SupportsNativeToolCalls;
                 var selectedTools = active.SelectedTools();
                 var protocol = AliOrchestrationProtocol.CreateDeclaration(selectedTools);
-                var planningMessages = _historyAdapter.BuildMessages(
+                var projectedInput = _contextProjector.Project(
+                    dispatch.Profile,
                     active.ImmutableOriginalRequest,
                     active.SnapshotInput(),
                     active.CapabilityDirectory,
                     selectedTools,
-                    active.AttachmentProjection);
+                    active.AttachmentProjection,
+                    protocol);
+                var planningMessages = projectedInput.Messages;
                 var planningOptions = CreatePlanningOptions(
                     options,
                     protocol,
                     useNative,
                     dispatch.Profile.OutputTokenLimit,
                     dispatch.BoundReasoningEffort);
-                var admission = _inputAdmission.Evaluate(
-                    dispatch.Profile,
-                    planningMessages,
-                    selectedTools,
-                    protocol);
+                var admission = projectedInput.Admission;
                 if (!admission.IsAdmitted)
                 {
-                    var message = admission.ToUserVisibleMessage();
+                    var message = projectedInput.ToUserVisibleFailure();
                     return await PrepareInterimResponseAsync(
                         active,
                         new ChatResponse(new ChatMessage(ChatRole.Assistant, message)),
@@ -396,6 +404,65 @@ internal sealed class AliOrchestrationPlanningClient : IChatClient
                     continue;
                 }
 
+                if (decision.NextAction is InspectEvidencePageAction evidencePage)
+                {
+                    var beforePagingBase = active.AuthoritativePagingBaseFingerprint();
+                    await AcceptDecisionAsync(
+                        active,
+                        decision,
+                        callId: null,
+                        toolName: null,
+                        requireRevisionAdvance: false,
+                        cancellationToken).ConfigureAwait(false);
+                    await active.ReadEvidencePageAsync(evidencePage, cancellationToken)
+                        .ConfigureAwait(false);
+                    if (await SuspendRepeatedUnchangedPagingAsync(
+                            active,
+                            response,
+                            beforePagingBase,
+                            seenPagingFingerprints,
+                            cancellationToken).ConfigureAwait(false) is { } suspended)
+                    {
+                        return suspended;
+                    }
+
+                    unchangedExpansionFingerprints.Clear();
+                    unchangedBlockedActionFingerprints.Clear();
+                    invalidDraftCount = 0;
+                    compatibilityFailureFingerprints.Clear();
+                    allowNativeProtocol = true;
+                    continue;
+                }
+
+                if (decision.NextAction is InspectWorkPageAction workPage)
+                {
+                    var beforePagingBase = active.AuthoritativePagingBaseFingerprint();
+                    await AcceptDecisionAsync(
+                        active,
+                        decision,
+                        callId: null,
+                        toolName: null,
+                        requireRevisionAdvance: false,
+                        cancellationToken).ConfigureAwait(false);
+                    active.ReadWorkPage(workPage);
+                    if (await SuspendRepeatedUnchangedPagingAsync(
+                            active,
+                            response,
+                            beforePagingBase,
+                            seenPagingFingerprints,
+                            cancellationToken).ConfigureAwait(false) is { } suspended)
+                    {
+                        return suspended;
+                    }
+
+                    unchangedExpansionFingerprints.Clear();
+                    unchangedBlockedActionFingerprints.Clear();
+                    invalidDraftCount = 0;
+                    compatibilityFailureFingerprints.Clear();
+                    allowNativeProtocol = true;
+                    continue;
+                }
+
                 var beforeActionSelection = active.SelectedToolFingerprint();
                 var beforeActionMaterial = active.AuthoritativeMaterialFingerprint();
                 var decisionFingerprint = StableDecisionFingerprint(decision);
@@ -459,6 +526,39 @@ internal sealed class AliOrchestrationPlanningClient : IChatClient
         {
             _planningGate.Release();
         }
+    }
+
+    private async Task<ChatResponse?> SuspendRepeatedUnchangedPagingAsync(
+        ActivePlanningTurn active,
+        ChatResponse response,
+        string beforePagingBase,
+        HashSet<string> seenPagingFingerprints,
+        CancellationToken cancellationToken)
+    {
+        var afterPagingBase = active.AuthoritativePagingBaseFingerprint();
+        if (!string.Equals(beforePagingBase, afterPagingBase, StringComparison.Ordinal))
+        {
+            seenPagingFingerprints.Clear();
+        }
+
+        var fingerprint = FailureFingerprint(
+            "inspect-page-view",
+            afterPagingBase,
+            active.InspectedPagingFingerprint());
+        if (seenPagingFingerprints.Add(fingerprint))
+        {
+            return null;
+        }
+
+        return await SuspendPlanningAsync(
+            active,
+            response,
+            fingerprint,
+            cancellationToken,
+            reasonCode: "planner-page-inspection-made-no-change",
+            visibleMessage:
+            "Ali paused this turn because the model repeatedly requested the same completed context page without changing the accepted work. The request and durable context were preserved and no action ran.")
+            .ConfigureAwait(false);
     }
 
     public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
@@ -585,15 +685,16 @@ internal sealed class AliOrchestrationPlanningClient : IChatClient
                     return null;
                 }
 
+                var completionRequest = new TemporaryCompletionRequest(
+                    active.ImmutableOriginalRequest,
+                    active.SnapshotInput(),
+                    decision,
+                    source,
+                    dossier.RequiredOutcomes,
+                    dossier.RequiredClaims,
+                    dossier.CitedEvidence);
                 var completionAttempt = await _completionBridge.CompleteAsync(
-                    new TemporaryCompletionRequest(
-                        active.ImmutableOriginalRequest,
-                        active.SnapshotInput(),
-                        decision,
-                        source,
-                        dossier.RequiredOutcomes,
-                        dossier.RequiredClaims,
-                        dossier.CitedEvidence),
+                    completionRequest,
                     cancellationToken).ConfigureAwait(false);
                 if (!completionAttempt.IsSuccessful)
                 {
@@ -613,11 +714,113 @@ internal sealed class AliOrchestrationPlanningClient : IChatClient
                 var completed = completionAttempt.Response
                     ?? throw new InvalidOperationException(
                         "The successful completion attempt did not provide a response.");
+                if (_completionCritic is null)
+                {
+                    return await PreparePublicationAsync(
+                        active,
+                        completed,
+                        completed.Text ?? string.Empty,
+                        cancellationToken).ConfigureAwait(false);
+                }
+
+                var committedDraft = completionAttempt.CommittedDraft;
+                var criticStore = active.Observer as IAliCompletionCriticReviewStore;
+                if (committedDraft is null || criticStore is null)
+                {
+                    const string unavailable =
+                        "Ali paused because the state-native answer or durable completion-review store was unavailable. The accepted work and evidence remain preserved, and no final answer was published.";
+                    return await PrepareInterimResponseAsync(
+                        active,
+                        new ChatResponse(new ChatMessage(ChatRole.Assistant, unavailable)),
+                        unavailable,
+                        AliPlanningInterimKind.CompletionOutputIncomplete,
+                        cancellationToken).ConfigureAwait(false);
+                }
+
+                var renderedDraft = AliAnswerDraftStore.BindExactRenderedText(
+                    committedDraft,
+                    _finalAnswerRenderer(active.Turn, committedDraft.Text));
+                var criticRequest = AliCompletionCriticRequestFactory.Create(
+                    completionRequest,
+                    renderedDraft,
+                    BuildCriticUnresolvedIssues(completionRequest),
+                    BuildCriticCapabilities(active.SelectedTools()));
+                var preparation = await _completionCritic.PrepareAsync(
+                        criticRequest,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                if (!preparation.IsSuccessful)
+                {
+                    var failure = preparation.Failure
+                        ?? throw new InvalidOperationException(
+                            "The failed completion-critic preparation had no typed reason.");
+                    return await PrepareInterimResponseAsync(
+                        active,
+                        new ChatResponse(new ChatMessage(
+                            ChatRole.Assistant,
+                            failure.UserVisibleMessage)),
+                        failure.UserVisibleMessage,
+                        MapCriticFailure(failure.Kind),
+                        cancellationToken).ConfigureAwait(false);
+                }
+
+                var criticAttempt = await _completionCritic.ReviewAsync(
+                        preparation.PreparedReview!,
+                        criticStore,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+                if (criticAttempt.StoreSnapshot is { } criticSnapshot)
+                {
+                    active.ApplyCompletionCriticStoreSnapshot(criticSnapshot);
+                }
+
+                if (!criticAttempt.IsSuccessful)
+                {
+                    var failure = criticAttempt.Failure
+                        ?? throw new InvalidOperationException(
+                            "The failed completion critic had no typed reason.");
+                    return await PrepareInterimResponseAsync(
+                        active,
+                        new ChatResponse(new ChatMessage(
+                            ChatRole.Assistant,
+                            failure.UserVisibleMessage)),
+                        failure.UserVisibleMessage,
+                        MapCriticFailure(failure.Kind),
+                        cancellationToken).ConfigureAwait(false);
+                }
+
+                var verdict = criticAttempt.Verdict!;
+                if (!verdict.Complete)
+                {
+                    if (active.RegisterCriticRejection(renderedDraft, verdict))
+                    {
+                        var fingerprint = FailureFingerprint(
+                            "completion-critic-repeated-rejection",
+                            renderedDraft.AnswerDigest,
+                            string.Join("\0", verdict.MaterialUnmetOutcomes));
+                        return await SuspendPlanningAsync(
+                            active,
+                            completed,
+                            fingerprint,
+                            cancellationToken,
+                            reasonCode: "completion-critic-repeated-rejection",
+                            visibleMessage:
+                            "Ali paused because the same completed draft was rejected again for the same material unmet outcomes without a change in accepted work or evidence. The request and critic findings were preserved; no final answer was published.")
+                            .ConfigureAwait(false);
+                    }
+
+                    return null;
+                }
+
                 return await PreparePublicationAsync(
                     active,
-                    completed,
-                    completed.Text ?? string.Empty,
-                    cancellationToken).ConfigureAwait(false);
+                    CopyMetadata(
+                        completed,
+                        new TextContent(renderedDraft.Text),
+                        ChatFinishReason.Stop),
+                    renderedDraft.Text,
+                    cancellationToken,
+                    answerAlreadyRendered: true).ConfigureAwait(false);
             default:
                 throw new InvalidOperationException(
                     "An accepted orchestration action did not have a translation boundary.");
@@ -745,9 +948,12 @@ internal sealed class AliOrchestrationPlanningClient : IChatClient
         ActivePlanningTurn active,
         ChatResponse response,
         string answerText,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool answerAlreadyRendered = false)
     {
-        var renderedAnswer = _finalAnswerRenderer(active.Turn, answerText);
+        var renderedAnswer = answerAlreadyRendered
+            ? answerText
+            : _finalAnswerRenderer(active.Turn, answerText);
         if (string.IsNullOrWhiteSpace(renderedAnswer))
         {
             throw new InvalidOperationException(
@@ -930,6 +1136,51 @@ internal sealed class AliOrchestrationPlanningClient : IChatClient
             _ => throw new InvalidOperationException(
                 "The completion failure kind is invalid.")
         };
+
+    private static AliPlanningInterimKind MapCriticFailure(
+        AliCompletionCriticFailureKind kind) => kind switch
+        {
+            AliCompletionCriticFailureKind.DispatchBindingsChanged =>
+                AliPlanningInterimKind.CompletionDispatchBindingsChanged,
+            AliCompletionCriticFailureKind.InputNotAdmitted =>
+                AliPlanningInterimKind.CompletionInputNotAdmitted,
+            AliCompletionCriticFailureKind.OutputIncomplete
+                or AliCompletionCriticFailureKind.IdenticalReviewInProgress
+                or AliCompletionCriticFailureKind.ReviewStoreFailure =>
+                AliPlanningInterimKind.CompletionOutputIncomplete,
+            _ => throw new InvalidOperationException(
+                "The completion-critic failure kind is invalid.")
+        };
+
+    private static IReadOnlyList<AliCompletionCriticUnresolvedIssue>
+        BuildCriticUnresolvedIssues(TemporaryCompletionRequest request) =>
+        request.CitedEvidence
+            .Where(static item => item.DomainOutcome != PlanningToolDomainOutcome.Succeeded)
+            .Select(static item => new AliCompletionCriticUnresolvedIssue(
+                item.EvidenceId,
+                item.DomainOutcome == PlanningToolDomainOutcome.Denied
+                    ? AliCompletionCriticIssueKind.PermissionDenied
+                    : AliCompletionCriticIssueKind.Failure,
+                BoundCriticText(item.Projection, item.ToolName + " did not report success."),
+                [item.EvidenceId]))
+            .ToArray();
+
+    private static IReadOnlyList<AliCompletionCriticCapability> BuildCriticCapabilities(
+        IReadOnlyList<AIFunctionDeclaration> selectedTools) =>
+        selectedTools
+            .Select(static tool => new AliCompletionCriticCapability(
+                tool.Name,
+                tool.Name,
+                BoundCriticText(tool.Description, tool.Name),
+                "selected and enabled for this planning pass",
+                "authoritative runtime permission policy applies"))
+            .ToArray();
+
+    private static string BoundCriticText(string? value, string fallback)
+    {
+        var exact = string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+        return exact.Length <= 4_000 ? exact : exact[..4_000];
+    }
 
     private static IReadOnlyList<AIFunctionDeclaration> SnapshotTaskTools(ChatOptions? options) =>
         options?.Tools?
@@ -1200,6 +1451,7 @@ internal sealed class AliOrchestrationPlanningClient : IChatClient
         private readonly Dictionary<string, AliPlanningToolResultObservedEvent> _pendingObservedEvents = new(StringComparer.Ordinal);
         private readonly HashSet<string> _observingCalls = new(StringComparer.Ordinal);
         private readonly IAliPlanningEvidenceAuthority? _evidenceAuthority;
+        private readonly IAliPlanningEvidencePager? _evidencePager;
         private string _stateProjection;
         private long _workGraphRevision;
         private WorkGraphSnapshot? _workGraph;
@@ -1211,6 +1463,10 @@ internal sealed class AliOrchestrationPlanningClient : IChatClient
         private string _liveToolFingerprint = string.Empty;
         private AliPreparedFinalPublication? _preparedFinalPublication;
         private AliPreparedInterimResponse? _preparedInterimResponse;
+        private AliPlanningEvidencePage? _inspectedEvidencePage;
+        private AliPlanningWorkPage? _inspectedWorkPage;
+        private readonly HashSet<string> _criticRejectionFingerprints =
+            new(StringComparer.Ordinal);
 
         internal ActivePlanningTurn(
             CoordinatorTurnContext turn,
@@ -1243,6 +1499,9 @@ internal sealed class AliOrchestrationPlanningClient : IChatClient
                 input.ApprovedExternalTicketIds,
                 StringComparer.Ordinal);
             _evidenceAuthority = observer as IAliPlanningEvidenceAuthority;
+            _evidencePager = observer as IAliPlanningEvidencePager;
+            _inspectedEvidencePage = input.InspectedEvidencePage;
+            _inspectedWorkPage = input.InspectedWorkPage;
         }
 
         internal CoordinatorTurnContext Turn { get; }
@@ -1373,7 +1632,40 @@ internal sealed class AliOrchestrationPlanningClient : IChatClient
                     _workIdentityFingerprint,
                     string.Join("\0", _evidence
                         .Select(item => item.EvidenceId)
+                        .Order(StringComparer.Ordinal)),
+                    _inspectedEvidencePage is null
+                        ? string.Empty
+                        : $"{_inspectedEvidencePage.SnapshotCursor}:{_inspectedEvidencePage.NextCursor}",
+                    _inspectedWorkPage is null
+                        ? string.Empty
+                        : $"{_inspectedWorkPage.SnapshotRevision}:{_inspectedWorkPage.NextWorkItemId}");
+            }
+        }
+
+        internal string AuthoritativePagingBaseFingerprint()
+        {
+            lock (_sync)
+            {
+                return FailureFingerprint(
+                    _workGraphRevision.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    _workIdentityFingerprint,
+                    string.Join("\0", _evidence
+                        .Select(item => item.EvidenceId)
                         .Order(StringComparer.Ordinal)));
+            }
+        }
+
+        internal string InspectedPagingFingerprint()
+        {
+            lock (_sync)
+            {
+                return FailureFingerprint(
+                    _inspectedEvidencePage is null
+                        ? string.Empty
+                        : $"e:{_inspectedEvidencePage.SnapshotCursor}:{_inspectedEvidencePage.RequestedAfterCursor}:{_inspectedEvidencePage.NextCursor}:{_inspectedEvidencePage.SnapshotAvailable}",
+                    _inspectedWorkPage is null
+                        ? string.Empty
+                        : $"w:{_inspectedWorkPage.SnapshotRevision}:{_inspectedWorkPage.RequestedAfterWorkItemId}:{_inspectedWorkPage.NextWorkItemId}:{_inspectedWorkPage.SnapshotAvailable}");
             }
         }
 
@@ -1656,6 +1948,47 @@ internal sealed class AliOrchestrationPlanningClient : IChatClient
             }
         }
 
+        internal void ApplyCompletionCriticStoreSnapshot(
+            AliCompletionCriticStoreSnapshot snapshot)
+        {
+            ArgumentNullException.ThrowIfNull(snapshot);
+            lock (_sync)
+            {
+                if (snapshot.StateRevision < StateRevision)
+                {
+                    throw new InvalidOperationException(
+                        "The completion critic returned a stale durable state snapshot.");
+                }
+
+                StateRevision = snapshot.StateRevision;
+                if (snapshot.AuthoritativeStateProjection is not null)
+                {
+                    _stateProjection = snapshot.AuthoritativeStateProjection;
+                }
+            }
+        }
+
+        internal bool RegisterCriticRejection(
+            AliCommittedAnswerDraft draft,
+            AliCompletionCriticVerdict verdict)
+        {
+            ArgumentNullException.ThrowIfNull(draft);
+            ArgumentNullException.ThrowIfNull(verdict);
+            lock (_sync)
+            {
+                var fingerprint = FailureFingerprint(
+                    _workGraphRevision.ToString(
+                        System.Globalization.CultureInfo.InvariantCulture),
+                    _workIdentityFingerprint,
+                    string.Join("\0", _evidence
+                        .Select(static item => item.EvidenceId)
+                        .Order(StringComparer.Ordinal)),
+                    draft.AnswerDigest,
+                    string.Join("\0", verdict.MaterialUnmetOutcomes));
+                return !_criticRejectionFingerprints.Add(fingerprint);
+            }
+        }
+
         internal AliPreparedInterimResponse? PreparedInterimResponse
         {
             get
@@ -1689,7 +2022,92 @@ internal sealed class AliOrchestrationPlanningClient : IChatClient
                     _workGraph is null ? _fallbackKnownWorkItemIds : null,
                     _approvedExternalTicketIds,
                     _workGraphRevision,
-                    _workGraph);
+                    _workGraph,
+                    _inspectedEvidencePage,
+                    _inspectedWorkPage);
+            }
+        }
+
+        internal async Task ReadEvidencePageAsync(
+            InspectEvidencePageAction request,
+            CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            AliPlanningEvidencePage page;
+            if (_evidencePager is null)
+            {
+                page = new AliPlanningEvidencePage(
+                    request.AfterCursor,
+                    request.SnapshotCursor ?? 0,
+                    CurrentCursor: 0,
+                    SnapshotAvailable: false,
+                    NextCursor: null,
+                    HasMore: false,
+                    Items: Array.Empty<AliPlanningEvidencePageItem>());
+            }
+            else
+            {
+                page = await _evidencePager.ReadEvidencePageAsync(
+                        request.AfterCursor,
+                        request.SnapshotCursor,
+                        request.PageSize,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            lock (_sync)
+            {
+                _inspectedEvidencePage = page;
+                _inspectedWorkPage = null;
+            }
+        }
+
+        internal void ReadWorkPage(InspectWorkPageAction request)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+            lock (_sync)
+            {
+                var requestedRevision = request.SnapshotRevision ?? _workGraphRevision;
+                if (requestedRevision != _workGraphRevision || _workGraph is null)
+                {
+                    _inspectedWorkPage = new AliPlanningWorkPage(
+                        request.AfterWorkItemId,
+                        requestedRevision,
+                        _workGraphRevision,
+                        SnapshotAvailable: false,
+                        NextWorkItemId: null,
+                        HasMore: false,
+                        Items: Array.Empty<AliPlanningWorkPageItem>());
+                    _inspectedEvidencePage = null;
+                    return;
+                }
+
+                var candidates = _workGraph.Nodes.Values
+                    .Where(node => request.AfterWorkItemId is null
+                        || StringComparer.Ordinal.Compare(node.Id, request.AfterWorkItemId) > 0)
+                    .OrderBy(static node => node.Id, StringComparer.Ordinal)
+                    .Take(request.PageSize + 1)
+                    .ToArray();
+                var hasMore = candidates.Length > request.PageSize;
+                var selected = hasMore ? candidates[..request.PageSize] : candidates;
+                var items = selected.Select(static node => new AliPlanningWorkPageItem(
+                        node.Id,
+                        node.Objective,
+                        node.Status.ToString(),
+                        node.ParentId,
+                        node.SupersededById,
+                        Array.AsReadOnly(node.DependsOn.ToArray()),
+                        Array.AsReadOnly(node.EvidenceIds.ToArray())))
+                    .ToArray();
+                _inspectedWorkPage = new AliPlanningWorkPage(
+                    request.AfterWorkItemId,
+                    requestedRevision,
+                    _workGraphRevision,
+                    SnapshotAvailable: true,
+                    NextWorkItemId: selected.Length == 0 ? null : selected[^1].Id,
+                    HasMore: hasMore,
+                    Items: Array.AsReadOnly(items));
+                _inspectedEvidencePage = null;
             }
         }
 

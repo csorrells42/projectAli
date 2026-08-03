@@ -15,12 +15,14 @@ public enum ActionReconciliationDisposition
 /// </summary>
 public enum PlanningAcceptedActionKind
 {
-    CallTool,
-    ExpandTools,
-    AnswerDirectly,
-    RequestUserInput,
-    AwaitExternalEvent,
-    BeginCompletion
+    CallTool = 0,
+    ExpandTools = 1,
+    AnswerDirectly = 2,
+    RequestUserInput = 3,
+    AwaitExternalEvent = 4,
+    BeginCompletion = 5,
+    InspectEvidencePage = 6,
+    InspectWorkPage = 7
 }
 
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "$transition")]
@@ -33,6 +35,8 @@ public enum PlanningAcceptedActionKind
 [JsonDerivedType(typeof(EvidenceReferencedTransition), "evidence-referenced")]
 [JsonDerivedType(typeof(ProgressAttemptRecordedTransition), "progress-attempt-recorded")]
 [JsonDerivedType(typeof(WorkGraphReferencedTransition), "work-graph-referenced")]
+[JsonDerivedType(typeof(CompletionCriticReviewPreparedTransition), "completion-critic-review-prepared")]
+[JsonDerivedType(typeof(CompletionCriticVerdictCommittedTransition), "completion-critic-verdict-committed")]
 [JsonDerivedType(typeof(ActionPreparedTransition), "action-prepared")]
 [JsonDerivedType(typeof(ActionCommittedTransition), "action-committed")]
 [JsonDerivedType(typeof(ActionMarkedInDoubtTransition), "action-in-doubt")]
@@ -269,6 +273,77 @@ public sealed record ProgressAttemptRecordedTransition(
         TurnStateIntegrity.RequireDigest(
             AfterMaterialFingerprint,
             nameof(AfterMaterialFingerprint));
+    }
+}
+
+public sealed record CompletionCriticReviewPreparedTransition(
+    string CorrelationKey,
+    string ReviewIdentityDigest,
+    long SourceStateRevision,
+    string AnswerId,
+    string AnswerDigest,
+    string[] RenderedPageHashes,
+    string RuntimeDigest,
+    string ModelDigest,
+    string GenerationSettingsDigest,
+    string ReasoningEffort) : TurnTransition(CorrelationKey)
+{
+    internal override void ValidateShape()
+    {
+        base.ValidateShape();
+        TurnStateIntegrity.RequireDigest(ReviewIdentityDigest, nameof(ReviewIdentityDigest));
+        if (SourceStateRevision <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(SourceStateRevision));
+        }
+
+        TurnStateIntegrity.RequireBoundedValue(AnswerId, 256, nameof(AnswerId));
+        TurnStateIntegrity.RequireDigest(AnswerDigest, nameof(AnswerDigest));
+        ArgumentNullException.ThrowIfNull(RenderedPageHashes);
+        if (RenderedPageHashes.Length == 0 || RenderedPageHashes.Length > 256)
+        {
+            throw new InvalidDataException(
+                "A completion-critic preparation requires one to 256 rendered page hashes.");
+        }
+
+        foreach (var hash in RenderedPageHashes)
+        {
+            TurnStateIntegrity.RequireDigest(hash, nameof(RenderedPageHashes));
+        }
+
+        TurnStateIntegrity.RequireDigest(RuntimeDigest, nameof(RuntimeDigest));
+        TurnStateIntegrity.RequireDigest(ModelDigest, nameof(ModelDigest));
+        TurnStateIntegrity.RequireDigest(
+            GenerationSettingsDigest,
+            nameof(GenerationSettingsDigest));
+        TurnStateIntegrity.RequireBoundedValue(ReasoningEffort, 128, nameof(ReasoningEffort));
+    }
+}
+
+public sealed record CompletionCriticVerdictCommittedTransition(
+    string CorrelationKey,
+    string ReviewIdentityDigest,
+    bool Complete,
+    string Basis,
+    string[] MaterialUnmetOutcomes) : TurnTransition(CorrelationKey)
+{
+    internal override void ValidateShape()
+    {
+        base.ValidateShape();
+        TurnStateIntegrity.RequireDigest(ReviewIdentityDigest, nameof(ReviewIdentityDigest));
+        TurnStateIntegrity.RequireBoundedValue(Basis, 4_000, nameof(Basis));
+        ArgumentNullException.ThrowIfNull(MaterialUnmetOutcomes);
+        if (MaterialUnmetOutcomes.Length > 64
+            || MaterialUnmetOutcomes.Any(static value =>
+                string.IsNullOrWhiteSpace(value) || value.Length > 2_000)
+            || MaterialUnmetOutcomes.Distinct(StringComparer.Ordinal).Count()
+                != MaterialUnmetOutcomes.Length
+            || MaterialUnmetOutcomes.Sum(static value => (long)value.Length) > 16_000
+            || Complete != (MaterialUnmetOutcomes.Length == 0))
+        {
+            throw new InvalidDataException(
+                "The completion-critic verdict shape is invalid.");
+        }
     }
 }
 

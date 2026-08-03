@@ -363,6 +363,132 @@ public sealed class ShadowToolObservationTests
         Assert.Equal(0, service.Health.Persisted);
     }
 
+    [Fact]
+    public async Task ConcurrentSaturation_NeverBackpressuresProducers_AndAccountsEveryAttempt()
+    {
+        const int capacity = 32;
+        const int concurrentAttempts = 2_048;
+        var sink = new BlockingCapturingSink();
+        await using var service = new ShadowToolObservationService(
+            sink,
+            capacity,
+            shutdownTimeout: TimeSpan.FromSeconds(10));
+        var identity = new TurnIdentity("user", "conversation", "message");
+        var now = DateTimeOffset.UtcNow;
+
+        Assert.True(ObserveReturned(service, identity, "call-in-flight", now));
+        await sink.Entered.Task.WaitAsync(TestContext.Current.CancellationToken);
+
+        bool[] accepted;
+        try
+        {
+            var producers = Enumerable.Range(0, concurrentAttempts)
+                .Select(index => Task.Run(
+                    () => ObserveReturned(service, identity, $"call-{index:D4}", now),
+                    TestContext.Current.CancellationToken))
+                .ToArray();
+            accepted = await Task.WhenAll(producers).WaitAsync(
+                TimeSpan.FromSeconds(10),
+                TestContext.Current.CancellationToken);
+        }
+        finally
+        {
+            sink.Release.TrySetResult();
+        }
+
+        await service.DisposeAsync();
+
+        var health = service.Health;
+        Assert.Equal(capacity, accepted.Count(value => value));
+        Assert.Equal(capacity + 1, health.Enqueued);
+        Assert.Equal(concurrentAttempts - capacity, health.QueueFullDrops);
+        Assert.Equal(0, health.Pending);
+        Assert.Equal(health.Enqueued, health.Persisted);
+        Assert.Equal(health.Enqueued, sink.Items.Count);
+        Assert.Equal(sink.Items.Count, sink.Items.Select(item => item.CallId).Distinct().Count());
+        Assert.False(health.IsAccepting);
+        Assert.True(health.IsReaderCompleted);
+    }
+
+    [Fact]
+    public async Task HighVolumeFaultMatrix_ContainsSinkFailures_AndKeepsDraining()
+    {
+        const int attempts = 4_096;
+        var sink = new FaultMatrixSink();
+        await using var service = new ShadowToolObservationService(
+            sink,
+            capacity: attempts,
+            shutdownTimeout: TimeSpan.FromSeconds(10));
+        var identity = new TurnIdentity("user", "conversation", "message");
+        var now = DateTimeOffset.UtcNow;
+
+        for (var index = 0; index < attempts; index++)
+        {
+            Assert.True(ObserveReturned(service, identity, $"call-{index:D4}", now));
+        }
+
+        await service.DisposeAsync();
+
+        var health = service.Health;
+        Assert.Equal(attempts, sink.Attempts);
+        Assert.Equal(attempts, health.Enqueued);
+        Assert.Equal(attempts / 4, health.Persisted);
+        Assert.Equal(attempts - (attempts / 4), health.PersistenceFailures);
+        Assert.Equal(0, health.QueueFullDrops);
+        Assert.Equal(0, health.Pending);
+        Assert.Equal(0, health.ShutdownAbandoned);
+        Assert.True(health.IsReaderCompleted);
+    }
+
+    [Fact]
+    public async Task CompletedService_RejectsEveryTerminalWithoutRestartingItsReader()
+    {
+        var sink = new CapturingSink();
+        var service = new ShadowToolObservationService(sink);
+        var identity = new TurnIdentity("user", "conversation", "message");
+        var now = DateTimeOffset.UtcNow;
+
+        Assert.True(ObserveReturned(service, identity, "accepted", now));
+        await service.DisposeAsync();
+
+        Assert.False(ObserveReturned(service, identity, "returned", now));
+        Assert.False(service.TryObserveDenied(
+            identity,
+            "denied",
+            "tool",
+            null,
+            "denied",
+            now,
+            now,
+            NotRequired));
+        Assert.False(service.TryObserveThrew(
+            identity,
+            "threw",
+            "tool",
+            null,
+            new IOException("sink-independent"),
+            now,
+            now,
+            NotRequired));
+        Assert.False(service.TryObserveCancelled(
+            identity,
+            "cancelled",
+            "tool",
+            null,
+            new OperationCanceledException(),
+            now,
+            now,
+            NotRequired));
+
+        var health = service.Health;
+        Assert.Equal(1, health.Enqueued);
+        Assert.Equal(1, health.Persisted);
+        Assert.Equal(4, health.StoppedDrops);
+        Assert.Equal(0, health.Pending);
+        Assert.False(health.IsAccepting);
+        Assert.True(health.IsReaderCompleted);
+    }
+
     private static bool ObserveReturned(
         ShadowToolObservationService service,
         TurnIdentity identity,
@@ -485,6 +611,41 @@ public sealed class ShadowToolObservationTests
         }
     }
 
+    private sealed class BlockingCapturingSink : IShadowObservationSink
+    {
+        private readonly object _sync = new();
+        private readonly List<ShadowToolObservation> _items = [];
+
+        public TaskCompletionSource Entered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource Release { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public IReadOnlyList<ShadowToolObservation> Items
+        {
+            get
+            {
+                lock (_sync)
+                {
+                    return _items.ToArray();
+                }
+            }
+        }
+
+        public async ValueTask PersistAsync(
+            ShadowToolObservation observation,
+            CancellationToken cancellationToken)
+        {
+            Entered.TrySetResult();
+            await Release.Task.WaitAsync(cancellationToken);
+            lock (_sync)
+            {
+                _items.Add(observation);
+            }
+        }
+    }
+
     private sealed class CancellationAwareBlockingSink : IShadowObservationSink
     {
         public TaskCompletionSource Entered { get; } =
@@ -519,6 +680,27 @@ public sealed class ShadowToolObservationTests
 
             SecondAttempt.TrySetResult();
             return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class FaultMatrixSink : IShadowObservationSink
+    {
+        private int _attempts;
+
+        public int Attempts => Volatile.Read(ref _attempts);
+
+        public ValueTask PersistAsync(
+            ShadowToolObservation observation,
+            CancellationToken cancellationToken)
+        {
+            var attempt = Interlocked.Increment(ref _attempts);
+            return (attempt % 4) switch
+            {
+                0 => ValueTask.CompletedTask,
+                1 => throw new IOException("synchronous sink failure"),
+                2 => ValueTask.FromException(new InvalidOperationException("faulted value task")),
+                _ => ValueTask.FromException(new OperationCanceledException("sink-local cancellation"))
+            };
         }
     }
 

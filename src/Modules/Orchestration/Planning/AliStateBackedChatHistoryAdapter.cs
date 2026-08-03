@@ -134,7 +134,9 @@ public sealed record AliPlanningTurnInput
         IEnumerable<string>? knownWorkItemIds = null,
         IEnumerable<string>? approvedExternalTicketIds = null,
         long workGraphRevision = 0,
-        WorkGraphSnapshot? authoritativeWorkGraph = null)
+        WorkGraphSnapshot? authoritativeWorkGraph = null,
+        AliPlanningEvidencePage? inspectedEvidencePage = null,
+        AliPlanningWorkPage? inspectedWorkPage = null)
     {
         if (stateRevision < 0)
         {
@@ -162,6 +164,8 @@ public sealed record AliPlanningTurnInput
             ? PlanningSnapshots.Strings(knownWorkItemIds)
             : Array.Empty<string>();
         ApprovedExternalTicketIds = PlanningSnapshots.Strings(approvedExternalTicketIds);
+        InspectedEvidencePage = inspectedEvidencePage;
+        InspectedWorkPage = inspectedWorkPage;
     }
 
     public long StateRevision { get; }
@@ -179,6 +183,10 @@ public sealed record AliPlanningTurnInput
     public IReadOnlyList<string> KnownWorkItemIds { get; }
 
     public IReadOnlyList<string> ApprovedExternalTicketIds { get; }
+
+    public AliPlanningEvidencePage? InspectedEvidencePage { get; }
+
+    public AliPlanningWorkPage? InspectedWorkPage { get; }
 }
 
 public sealed record AliPlanningDecisionAcceptedEvent(
@@ -393,7 +401,7 @@ public sealed class AliStateBackedChatHistoryAdapter
 {
     private const int MaximumCapabilityDirectoryCharacters = 16_000;
     private const int MaximumSelectedToolDescriptionCharacters = 240;
-    private const int MaximumEvidenceProjections = 12;
+    internal const int MaximumEvidenceProjections = 12;
 
     public IReadOnlyList<ChatMessage> BuildMessages(
         string immutableOriginalRequest,
@@ -412,12 +420,30 @@ public sealed class AliStateBackedChatHistoryAdapter
         AliPlanningTurnInput input,
         string capabilityDirectory,
         IReadOnlyList<AIFunctionDeclaration> selectedTools,
-        AliPlanningAttachmentProjection attachmentProjection)
+        AliPlanningAttachmentProjection attachmentProjection,
+        AliPlanningContextWindowSlice? contextWindow = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(immutableOriginalRequest);
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(selectedTools);
         ArgumentNullException.ThrowIfNull(attachmentProjection);
+
+        var totalReferentialConversation = input.AcceptedPriorConversation.Count(
+            static item => !item.IsSteering);
+        var effectiveWindow = contextWindow ?? new AliPlanningContextWindowSlice(
+            totalReferentialConversation,
+            Math.Min(input.AcceptedEvidence.Count, MaximumEvidenceProjections),
+            totalReferentialConversation,
+            input.AcceptedEvidence.Count,
+            input.InspectedEvidencePage?.Items.Count ?? 0,
+            input.InspectedEvidencePage?.Items.Count ?? 0,
+            input.InspectedWorkPage?.Items.Count ?? 0,
+            input.InspectedWorkPage?.Items.Count ?? 0);
+        var includedReferentialSequences = input.AcceptedPriorConversation
+            .Where(static item => !item.IsSteering)
+            .TakeLast(effectiveWindow.ReferencedConversationLimit)
+            .Select(static item => item.Sequence)
+            .ToHashSet();
 
         var originalRequestContents = new List<AIContent>
         {
@@ -445,7 +471,8 @@ public sealed class AliStateBackedChatHistoryAdapter
             new(ChatRole.User, originalRequestContents)
         };
 
-        foreach (var entry in input.AcceptedPriorConversation)
+        foreach (var entry in input.AcceptedPriorConversation.Where(
+                     entry => entry.IsSteering || includedReferentialSequences.Contains(entry.Sequence)))
         {
             messages.Add(new ChatMessage(
                 ChatRole.User,
@@ -479,7 +506,7 @@ public sealed class AliStateBackedChatHistoryAdapter
                 }).ToArray()
             },
             acceptedEvidence = input.AcceptedEvidence
-                .TakeLast(MaximumEvidenceProjections)
+                .TakeLast(effectiveWindow.EvidenceLimit)
                 .Select(evidence => new
                 {
                     evidenceId = evidence.EvidenceId,
@@ -490,7 +517,33 @@ public sealed class AliStateBackedChatHistoryAdapter
                     domainOutcome = evidence.DomainOutcome.ToString(),
                     evidence.Projection
                 })
-                .ToArray()
+                .ToArray(),
+            contextWindow = new
+            {
+                paged = effectiveWindow.IsPaged,
+                referentialConversation = new
+                {
+                    total = effectiveWindow.TotalReferentialConversation,
+                    included = Math.Min(
+                        effectiveWindow.ReferencedConversationLimit,
+                        effectiveWindow.TotalReferentialConversation),
+                    omitted = Math.Max(
+                        0,
+                        effectiveWindow.TotalReferentialConversation
+                        - effectiveWindow.ReferencedConversationLimit)
+                },
+                acceptedEvidence = new
+                {
+                    total = effectiveWindow.TotalEvidence,
+                    included = Math.Min(effectiveWindow.EvidenceLimit, effectiveWindow.TotalEvidence),
+                    omitted = Math.Max(0, effectiveWindow.TotalEvidence - effectiveWindow.EvidenceLimit)
+                },
+                retrieval = effectiveWindow.IsPaged
+                    ? "Use inspectEvidencePage or inspectWorkPage when omitted durable material is needed; do not infer omitted content."
+                    : "No optional planning material was paged out."
+            },
+            inspectedEvidencePage = input.InspectedEvidencePage,
+            inspectedWorkPage = input.InspectedWorkPage
         });
         messages.Add(new ChatMessage(
             ChatRole.User,

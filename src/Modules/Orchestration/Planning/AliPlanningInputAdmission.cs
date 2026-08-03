@@ -111,6 +111,20 @@ internal sealed class AliPlanningInputAdmission
             protocol: null,
             purpose: AliModelInputPurpose.Completion);
 
+    internal AliPlanningInputAdmissionResult EvaluateCompletion(
+        ModelProfile profile,
+        IReadOnlyList<ChatMessage> messages,
+        AIFunctionDeclaration compositionProtocol)
+    {
+        ArgumentNullException.ThrowIfNull(compositionProtocol);
+        return EvaluateCore(
+            profile,
+            messages,
+            Array.Empty<AIFunctionDeclaration>(),
+            compositionProtocol,
+            AliModelInputPurpose.Completion);
+    }
+
     private AliPlanningInputAdmissionResult EvaluateCore(
         ModelProfile profile,
         IReadOnlyList<ChatMessage> messages,
@@ -309,7 +323,8 @@ internal sealed class AliModelAwarePlanningInputCounter : IAliPlanningInputCount
 
             // Planning sends the orchestration protocol either as a required native function or
             // as the compatibility response schema, so charge it once in both planning modes.
-            // The final composer sends neither tools nor a protocol and therefore passes null.
+            // Protocol-based completion sends only its composition protocol and therefore charges
+            // it once through this same argument without adding any task tools.
             if (protocol is not null)
             {
                 AddTool(protocol);

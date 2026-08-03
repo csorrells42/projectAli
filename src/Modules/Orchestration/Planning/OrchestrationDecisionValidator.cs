@@ -333,6 +333,55 @@ public sealed class OrchestrationDecisionValidator
                 }
 
                 break;
+            case InspectEvidencePageAction page:
+                ValidatePagingEnvelope(
+                    decision,
+                    allowWorkUpdate: true,
+                    errors);
+                if (page.AfterCursor < 0
+                    || page.SnapshotCursor is < 0
+                    || (page.AfterCursor > 0 && page.SnapshotCursor is null)
+                    || (page.SnapshotCursor is { } snapshot
+                        && page.AfterCursor > snapshot))
+                {
+                    errors.Add(
+                        "InspectEvidencePage requires nonnegative cursors, a snapshotCursor for continuation, and afterCursor cannot exceed snapshotCursor.");
+                }
+
+                if (page.PageSize is < 1 or > 32)
+                {
+                    errors.Add("InspectEvidencePage.pageSize must be between 1 and 32.");
+                }
+
+                break;
+            case InspectWorkPageAction page:
+                ValidatePagingEnvelope(
+                    decision,
+                    allowWorkUpdate: false,
+                    errors);
+                if (page.AfterWorkItemId is not null && !ValidIdentifier(page.AfterWorkItemId))
+                {
+                    errors.Add(
+                        "InspectWorkPage.afterWorkItemId must be null or a canonical identifier.");
+                }
+
+                if (page.AfterWorkItemId is not null && page.SnapshotRevision is null)
+                {
+                    errors.Add(
+                        "InspectWorkPage requires snapshotRevision when continuing after a work item.");
+                }
+
+                if (page.SnapshotRevision is < 0)
+                {
+                    errors.Add("InspectWorkPage.snapshotRevision cannot be negative.");
+                }
+
+                if (page.PageSize is < 1 or > 32)
+                {
+                    errors.Add("InspectWorkPage.pageSize must be between 1 and 32.");
+                }
+
+                break;
             case AnswerDirectlyAction answer:
                 if (decision.MaterialClaims.Count != 0)
                 {
@@ -390,6 +439,21 @@ public sealed class OrchestrationDecisionValidator
             default:
                 errors.Add("The orchestration action type is not recognized.");
                 break;
+        }
+    }
+
+    private static void ValidatePagingEnvelope(
+        OrchestrationDecision decision,
+        bool allowWorkUpdate,
+        List<string> errors)
+    {
+        if ((!allowWorkUpdate && decision.WorkUpdate is not null)
+            || decision.MaterialClaims.Count != 0)
+        {
+            errors.Add(
+                allowWorkUpdate
+                    ? "An evidence paging action cannot also declare transient material claims; record page findings in the authoritative work graph."
+                    : "A work paging action cannot also change work state or declare material claims because that would invalidate its snapshot.");
         }
     }
 

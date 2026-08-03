@@ -462,6 +462,111 @@ public sealed record FinalPublicationState(
     }
 }
 
+public enum CompletionCriticReviewPersistenceStatus
+{
+    Prepared,
+    Committed
+}
+
+/// <summary>
+/// Compact restart-safe receipt for the one completion review associated with the current
+/// completion/evidence/runtime identity. Critic prose is retained for the typed verdict receipt
+/// but is not projected back to the planner as evidence.
+/// </summary>
+public sealed record CompletionCriticReviewPersistenceState(
+    string ReviewIdentityDigest,
+    long SourceStateRevision,
+    string AnswerId,
+    string AnswerDigest,
+    string[] RenderedPageHashes,
+    string RuntimeDigest,
+    string ModelDigest,
+    string GenerationSettingsDigest,
+    string ReasoningEffort,
+    CompletionCriticReviewPersistenceStatus Status,
+    bool? Complete,
+    string? Basis,
+    string[] MaterialUnmetOutcomes,
+    long PreparedAtRevision,
+    long LastTransitionRevision)
+{
+    internal void Validate()
+    {
+        TurnStateIntegrity.RequireDigest(ReviewIdentityDigest, nameof(ReviewIdentityDigest));
+        if (SourceStateRevision <= 0)
+        {
+            throw new InvalidDataException(
+                "A completion-critic source-state revision must be positive.");
+        }
+
+        TurnStateIntegrity.RequireBoundedValue(AnswerId, 256, nameof(AnswerId));
+        TurnStateIntegrity.RequireDigest(AnswerDigest, nameof(AnswerDigest));
+        ArgumentNullException.ThrowIfNull(RenderedPageHashes);
+        if (RenderedPageHashes.Length == 0 || RenderedPageHashes.Length > 256)
+        {
+            throw new InvalidDataException(
+                "A completion-critic receipt requires one to 256 rendered page hashes.");
+        }
+
+        foreach (var hash in RenderedPageHashes)
+        {
+            TurnStateIntegrity.RequireDigest(hash, nameof(RenderedPageHashes));
+        }
+
+        TurnStateIntegrity.RequireDigest(RuntimeDigest, nameof(RuntimeDigest));
+        TurnStateIntegrity.RequireDigest(ModelDigest, nameof(ModelDigest));
+        TurnStateIntegrity.RequireDigest(
+            GenerationSettingsDigest,
+            nameof(GenerationSettingsDigest));
+        TurnStateIntegrity.RequireBoundedValue(ReasoningEffort, 128, nameof(ReasoningEffort));
+
+        if (!Enum.IsDefined(Status)
+            || PreparedAtRevision != SourceStateRevision + 1
+            || LastTransitionRevision < PreparedAtRevision)
+        {
+            throw new InvalidDataException(
+                "The completion-critic receipt lifecycle metadata is invalid.");
+        }
+
+        ArgumentNullException.ThrowIfNull(MaterialUnmetOutcomes);
+        if (MaterialUnmetOutcomes.Length > 64
+            || MaterialUnmetOutcomes.Any(static value =>
+                string.IsNullOrWhiteSpace(value) || value.Length > 2_000)
+            || MaterialUnmetOutcomes.Distinct(StringComparer.Ordinal).Count()
+                != MaterialUnmetOutcomes.Length
+            || MaterialUnmetOutcomes.Sum(static value => (long)value.Length) > 16_000)
+        {
+            throw new InvalidDataException(
+                "The completion-critic receipt has invalid material unmet outcomes.");
+        }
+
+        if (Status == CompletionCriticReviewPersistenceStatus.Prepared)
+        {
+            if (Complete is not null || Basis is not null || MaterialUnmetOutcomes.Length != 0
+                || LastTransitionRevision != PreparedAtRevision)
+            {
+                throw new InvalidDataException(
+                    "A prepared completion-critic receipt cannot contain a verdict.");
+            }
+
+            return;
+        }
+
+        if (Complete is null)
+        {
+            throw new InvalidDataException(
+                "A committed completion-critic receipt requires a typed verdict.");
+        }
+
+        TurnStateIntegrity.RequireBoundedValue(Basis!, 4_000, nameof(Basis));
+        if (Complete.Value != (MaterialUnmetOutcomes.Length == 0))
+        {
+            throw new InvalidDataException(
+                "A complete critic verdict has no unmet outcomes and an incomplete verdict has at least one.");
+        }
+    }
+}
+
 public sealed record InterimPublicationState(
     string PublicationId,
     InterimPublicationKind Kind,
@@ -554,7 +659,8 @@ public sealed record TurnState(
     InterimPublicationState? InterimPublication,
     FinalPublicationState? FinalPublication,
     DateTimeOffset UpdatedAtUtc,
-    CommittedWorkGraphReference? WorkGraphReference = null)
+    CommittedWorkGraphReference? WorkGraphReference = null,
+    CompletionCriticReviewPersistenceState? CompletionCriticReview = null)
 {
     public string OriginalRequestDigest => OriginalRequest.ContentDigest;
 
@@ -638,6 +744,12 @@ public sealed record TurnState(
         PendingAcceptedCall?.Validate();
         InterimPublication?.Validate();
         FinalPublication?.Validate();
+        CompletionCriticReview?.Validate();
+        if (CompletionCriticReview?.LastTransitionRevision > Revision)
+        {
+            throw new InvalidDataException(
+                "The completion-critic receipt cannot be newer than the turn state.");
+        }
         if (InterimPublication is { } typedInterim)
         {
             switch (typedInterim.Reason)
