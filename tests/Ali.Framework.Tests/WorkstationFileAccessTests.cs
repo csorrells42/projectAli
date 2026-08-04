@@ -39,6 +39,73 @@ public sealed class WorkstationFileAccessTests
     }
 
     [Fact]
+    public async Task CoreAssistant_WpfGeneratedMembersDoNotBlockSourceWrite()
+    {
+        await WithAccessAsync(async (_, access, _) =>
+        {
+            const string path = "Workspace/WpfApp/MainWindow.xaml.cs";
+            await access.Store.WriteAsync(
+                path,
+                "namespace WpfApp; public partial class MainWindow { public MainWindow() { InitializeComponent(); } }",
+                TestContext.Current.CancellationToken);
+
+            const string codeBehind =
+                "namespace WpfApp; public partial class MainWindow { public MainWindow() { InitializeComponent(); ParticleCanvas.ToString(); } private void StartButton_Click(object sender, object e) { ParticleCanvas.ToString(); } }";
+            using (AliCoreAssistantExecutionContext.Enter())
+            {
+                await access.Store.WriteAsync(path, codeBehind, TestContext.Current.CancellationToken);
+            }
+
+            Assert.Equal(
+                codeBehind,
+                await access.Store.ReadAsync(path, TestContext.Current.CancellationToken));
+        });
+    }
+
+    [Fact]
+    public async Task CoreAssistant_NewCSharpSyntaxErrorStillBlocksSourceWrite()
+    {
+        await WithAccessAsync(async (_, access, _) =>
+        {
+            const string path = "Workspace/App/Program.cs";
+            const string original = "namespace App; public static class Program { public static void Main() { } }";
+            await access.Store.WriteAsync(path, original, TestContext.Current.CancellationToken);
+
+            using (AliCoreAssistantExecutionContext.Enter())
+            {
+                var error = await Assert.ThrowsAsync<InvalidDataException>(() =>
+                    access.Store.WriteAsync(
+                        path,
+                        "namespace App; public static class Program { public static void Main( { } }",
+                        TestContext.Current.CancellationToken));
+                Assert.Contains("syntax errors", error.Message, StringComparison.OrdinalIgnoreCase);
+            }
+
+            Assert.Equal(
+                original,
+                await access.Store.ReadAsync(path, TestContext.Current.CancellationToken));
+        });
+    }
+
+    [Fact]
+    public async Task ModelPresentedDoubleQuotes_AreRemovedFromVirtualPathBoundary()
+    {
+        await WithAccessAsync(async (root, access, _) =>
+        {
+            await access.Store.WriteAsync(
+                "\"Workspace/quoted.txt\"",
+                "value",
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(
+                "value",
+                await File.ReadAllTextAsync(
+                    Path.Combine(root, "workspace", "quoted.txt"),
+                    TestContext.Current.CancellationToken));
+        });
+    }
+
+    [Fact]
     public void CapabilityCatalog_MatchesEveryFrameworkFileToolName()
     {
         var expected = new[]

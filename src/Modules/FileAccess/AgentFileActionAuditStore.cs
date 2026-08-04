@@ -78,8 +78,6 @@ public sealed class AuditedAgentFileStore(
     AgentFileStore inner,
     AgentFileActionAuditStore audit) : AgentFileStore
 {
-    private static readonly Lazy<IReadOnlyList<MetadataReference>> CoreSourceReferences =
-        new(CreateCoreSourceReferences, LazyThreadSafetyMode.ExecutionAndPublication);
     private static readonly string[] WriteToolNames =
     [
         AliCapabilityCatalog.FileWriteName,
@@ -226,10 +224,10 @@ public sealed class AuditedAgentFileStore(
                 + "Preserve the working source and make smaller targeted replacements, then build after each coherent batch.");
         }
 
-        ValidateCoreCSharpEdit(path, currentContent, postContent, cancellationToken);
+        ValidateCoreCSharpSyntaxEdit(path, currentContent, postContent, cancellationToken);
     }
 
-    private static void ValidateCoreCSharpEdit(
+    private static void ValidateCoreCSharpSyntaxEdit(
         string path,
         string currentContent,
         string postContent,
@@ -240,8 +238,8 @@ public sealed class AuditedAgentFileStore(
             return;
         }
 
-        var currentErrors = CompileCoreSource(path, currentContent, cancellationToken);
-        var postErrors = CompileCoreSource(path, postContent, cancellationToken);
+        var currentErrors = ParseCoreSource(path, currentContent, cancellationToken);
+        var postErrors = ParseCoreSource(path, postContent, cancellationToken);
         var remainingCurrentErrors = currentErrors
             .GroupBy(DiagnosticFingerprint, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
@@ -269,25 +267,20 @@ public sealed class AuditedAgentFileStore(
             introduced.Take(6).Select(diagnostic =>
                 $"{diagnostic.Id}: {diagnostic.GetMessage()}"));
         throw new InvalidDataException(
-            "Roslyn rejected the proposed source edit before disk mutation because it introduced compiler errors. "
+            "Roslyn rejected the proposed source edit before disk mutation because it introduced C# syntax errors. "
             + detail
             + " Re-read the exact affected region and submit a corrected targeted edit.");
     }
 
-    private static IReadOnlyList<Diagnostic> CompileCoreSource(
+    private static IReadOnlyList<Diagnostic> ParseCoreSource(
         string path,
         string content,
         CancellationToken cancellationToken)
     {
-        var syntaxTree = CSharpSyntaxTree.ParseText(
-            content,
-            path: path,
-            cancellationToken: cancellationToken);
-        return CSharpCompilation.Create(
-                "AliCoreSourcePreview",
-                [syntaxTree],
-                CoreSourceReferences.Value,
-                new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary))
+        return CSharpSyntaxTree.ParseText(
+                content,
+                path: path,
+                cancellationToken: cancellationToken)
             .GetDiagnostics(cancellationToken)
             .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
             .ToArray();
@@ -295,22 +288,6 @@ public sealed class AuditedAgentFileStore(
 
     private static string DiagnosticFingerprint(Diagnostic diagnostic) =>
         diagnostic.Id + "\0" + diagnostic.GetMessage();
-
-    private static IReadOnlyList<MetadataReference> CreateCoreSourceReferences()
-    {
-        var trustedPlatformAssemblies = AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string;
-        if (string.IsNullOrWhiteSpace(trustedPlatformAssemblies))
-        {
-            return [MetadataReference.CreateFromFile(typeof(object).Assembly.Location)];
-        }
-
-        return trustedPlatformAssemblies
-            .Split(System.IO.Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
-            .Where(File.Exists)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Select(path => MetadataReference.CreateFromFile(path))
-            .ToArray();
-    }
 
     private static bool IsProtectedSourcePath(string path)
     {

@@ -442,6 +442,7 @@ public sealed class AliWorkstationFileStore : AgentFileStore
     private ResolvedPath Resolve(string path, bool allowMountRoot)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        path = NormalizePresentedPath(path);
         if (Path.IsPathFullyQualified(path))
         {
             return ResolveApprovedAbsolutePath(path, allowMountRoot);
@@ -475,6 +476,9 @@ public sealed class AliWorkstationFileStore : AgentFileStore
 
         return new ResolvedPath(mount, relativePath);
     }
+
+    private static string NormalizePresentedPath(string path) =>
+        path.Trim().Trim('"');
 
     private ResolvedPath ResolveApprovedAbsolutePath(string path, bool allowMountRoot)
     {
