@@ -1743,6 +1743,7 @@ internal sealed class AliToolCallingChatClient(
 
     private static bool IsPegNativeFormatFailure(Exception exception) =>
         exception.Message.Contains("peg-native", StringComparison.OrdinalIgnoreCase)
+        || exception.Message.Contains("Failed to process regex", StringComparison.OrdinalIgnoreCase)
         || exception.Message.Contains("does not match the expected", StringComparison.OrdinalIgnoreCase)
            && exception.Message.Contains("format", StringComparison.OrdinalIgnoreCase);
 

@@ -18,9 +18,11 @@ public sealed record CoordinatorNavigationLinkResult(
 /// Google Maps resolves the live places, road network, traffic, steps, distance, and ETA only
 /// when the user opens the generated URL.
 /// </summary>
-internal sealed class AliNavigationTools(Func<CoordinatorTurnContext?> turnAccessor)
+internal sealed class AliNavigationTools
 {
     private const int MaximumWaypoints = 3;
+    private readonly Func<CoordinatorTurnContext?> turnAccessor;
+    private readonly Func<WebSourceBackendSettings> settingsProvider;
     private static readonly HashSet<string> SupportedTravelModes =
         new(StringComparer.OrdinalIgnoreCase)
         {
@@ -29,6 +31,21 @@ internal sealed class AliNavigationTools(Func<CoordinatorTurnContext?> turnAcces
             "bicycling",
             "transit"
         };
+
+    public AliNavigationTools(Func<CoordinatorTurnContext?> turnAccessor)
+        : this(turnAccessor, static () => new WebSourceBackendSettings())
+    {
+    }
+
+    public AliNavigationTools(
+        Func<CoordinatorTurnContext?> turnAccessor,
+        Func<WebSourceBackendSettings> settingsProvider)
+    {
+        ArgumentNullException.ThrowIfNull(turnAccessor);
+        ArgumentNullException.ThrowIfNull(settingsProvider);
+        this.turnAccessor = turnAccessor;
+        this.settingsProvider = settingsProvider;
+    }
 
     public CoordinatorNavigationLinkResult CreateGoogleMapsDirectionsLink(
         [Description("Explicit route origin as an address, place name, or Google place query. Never invent an address.")]
@@ -74,7 +91,9 @@ internal sealed class AliNavigationTools(Func<CoordinatorTurnContext?> turnAcces
             query.Add("waypoints=" + Uri.EscapeDataString(string.Join('|', normalizedWaypoints)));
         }
 
-        var url = "https://www.google.com/maps/dir/?" + string.Join('&', query);
+        var navigationBase = RequireConfiguredNavigationBase(
+            settingsProvider()?.GoogleMapsDirectionsBaseUrl);
+        var url = navigationBase.AbsoluteUri.TrimEnd('?') + "?" + string.Join('&', query);
         if (turnAccessor() is { } turn)
         {
             turn.UsedEvidenceTool = true;
@@ -106,5 +125,20 @@ internal sealed class AliNavigationTools(Func<CoordinatorTurnContext?> turnAcces
         }
 
         return normalized;
+    }
+
+    private static Uri RequireConfiguredNavigationBase(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)
+            || !Uri.TryCreate(value.Trim(), UriKind.Absolute, out var endpoint)
+            || !string.Equals(endpoint.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+            || !string.IsNullOrEmpty(endpoint.Query)
+            || !string.IsNullOrEmpty(endpoint.Fragment))
+        {
+            throw new InvalidOperationException(
+                "Internet setting 'googleMapsDirectionsBaseUrl' must be an absolute HTTPS URL without a query or fragment; no navigation link was created.");
+        }
+
+        return endpoint;
     }
 }

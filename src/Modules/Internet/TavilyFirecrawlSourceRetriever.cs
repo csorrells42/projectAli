@@ -1089,14 +1089,17 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
         values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
 
     private Uri BuildTavilyEndpoint(string path) =>
-        BuildEndpoint(settings.TavilyBaseUrl, "https://api.tavily.com", path);
+        BuildEndpoint(settings.TavilyBaseUrl, path, nameof(settings.TavilyBaseUrl));
 
     private Uri BuildFirecrawlEndpoint(string path) =>
-        BuildEndpoint(settings.FirecrawlBaseUrl, "https://api.firecrawl.dev/v2", path);
+        BuildEndpoint(settings.FirecrawlBaseUrl, path, nameof(settings.FirecrawlBaseUrl));
 
     private Uri BuildBraveSearchEndpoint(string query, SourceQueryPlan plan)
     {
-        var endpoint = BuildEndpoint(settings.BraveSearchBaseUrl, "https://api.search.brave.com/res/v1/web", "search");
+        var endpoint = BuildEndpoint(
+            settings.BraveSearchBaseUrl,
+            "search",
+            nameof(settings.BraveSearchBaseUrl));
         var queryParts = new Dictionary<string, string?>
         {
             ["q"] = query,
@@ -1112,20 +1115,38 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
     }
 
     private Uri BuildSerperEndpoint(string path) =>
-        BuildEndpoint(settings.SerperBaseUrl, "https://google.serper.dev", path);
+        BuildEndpoint(settings.SerperBaseUrl, path, nameof(settings.SerperBaseUrl));
 
-    private static Uri BuildEndpoint(string baseUrl, string fallbackBaseUrl, string path)
+    private static Uri BuildEndpoint(string? baseUrl, string path, string settingName)
     {
-        var trimmedBase = string.IsNullOrWhiteSpace(baseUrl)
-            ? fallbackBaseUrl
-            : baseUrl.Trim().TrimEnd('/');
+        if (string.IsNullOrWhiteSpace(baseUrl))
+        {
+            throw new InvalidOperationException(
+                $"Internet setting '{settingName}' is not configured; no request was sent.");
+        }
+
+        var trimmedBase = baseUrl.Trim().TrimEnd('/');
+        if (!Uri.TryCreate(trimmedBase, UriKind.Absolute, out var configuredBase)
+            || !string.Equals(configuredBase.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+            || !string.IsNullOrEmpty(configuredBase.Query)
+            || !string.IsNullOrEmpty(configuredBase.Fragment))
+        {
+            throw new InvalidOperationException(
+                $"Internet setting '{settingName}' must be an absolute HTTPS URL without a query or fragment; no request was sent.");
+        }
+
         var trimmedPath = path.Trim().TrimStart('/');
         if (trimmedBase.EndsWith($"/{trimmedPath}", StringComparison.OrdinalIgnoreCase))
         {
-            return new Uri(trimmedBase, UriKind.Absolute);
+            return configuredBase;
         }
 
-        return new Uri($"{trimmedBase}/{trimmedPath}", UriKind.Absolute);
+        var endpointText = $"{trimmedBase}/{trimmedPath}";
+        return Uri.TryCreate(endpointText, UriKind.Absolute, out var endpoint)
+               && string.Equals(endpoint.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+            ? endpoint
+            : throw new InvalidOperationException(
+                $"Internet setting '{settingName}' could not form an absolute HTTPS endpoint; no request was sent.");
     }
 
     private static string BuildQueryString(IReadOnlyDictionary<string, string?> values) =>
@@ -1182,7 +1203,11 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
     }
 
     private string BuildFirecrawlKeyHint() =>
-        string.IsNullOrWhiteSpace(settings.ResolveFirecrawlApiKey())
+        string.Equals(
+            settings.FirecrawlAuthenticationMode?.Trim(),
+            WebProviderAuthenticationModes.ApiKey,
+            StringComparison.OrdinalIgnoreCase)
+        && string.IsNullOrWhiteSpace(settings.ResolveFirecrawlApiKey())
             ? $" Set {settings.FirecrawlApiKeyEnvironmentVariable} or add firecrawlApiKey to internet_backends.json."
             : string.Empty;
 
@@ -1203,28 +1228,45 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
 
     private bool CanCallFirecrawl(out string? apiKey, out string missingKeyWarning)
     {
-        apiKey = settings.ResolveFirecrawlApiKey();
-        if (!string.IsNullOrWhiteSpace(apiKey) || !IsOfficialFirecrawlEndpoint(settings.FirecrawlBaseUrl))
+        var authenticationMode = settings.FirecrawlAuthenticationMode?.Trim();
+        if (string.Equals(
+                authenticationMode,
+                WebProviderAuthenticationModes.None,
+                StringComparison.OrdinalIgnoreCase))
         {
+            apiKey = null;
             missingKeyWarning = string.Empty;
             return true;
         }
 
-        missingKeyWarning = $"Firecrawl API key is not configured. Set {settings.FirecrawlApiKeyEnvironmentVariable} or add firecrawlApiKey to internet_backends.json.";
+        if (string.Equals(
+                authenticationMode,
+                WebProviderAuthenticationModes.ApiKey,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            apiKey = settings.ResolveFirecrawlApiKey();
+            if (!string.IsNullOrWhiteSpace(apiKey))
+            {
+                missingKeyWarning = string.Empty;
+                return true;
+            }
+
+            missingKeyWarning = $"Firecrawl API key is not configured. Set {settings.FirecrawlApiKeyEnvironmentVariable} or add firecrawlApiKey to internet_backends.json.";
+            return false;
+        }
+
+        apiKey = null;
+        missingKeyWarning =
+            $"Firecrawl authentication mode '{authenticationMode ?? "<null>"}' is not supported. Configure '{WebProviderAuthenticationModes.ApiKey}' or '{WebProviderAuthenticationModes.None}' in internet_backends.json.";
         return false;
     }
-
-    private static bool IsOfficialFirecrawlEndpoint(string? baseUrl) =>
-        string.IsNullOrWhiteSpace(baseUrl)
-        || Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri)
-        && string.Equals(uri.Host, "api.firecrawl.dev", StringComparison.OrdinalIgnoreCase);
 
     private bool IsProviderConfigured(InternetSearchProvider provider) =>
         provider switch
         {
             InternetSearchProvider.GoogleGroundedSearch => geminiGroundedSearch.IsConfigured(),
             InternetSearchProvider.Tavily => !string.IsNullOrWhiteSpace(settings.ResolveTavilyApiKey()),
-            InternetSearchProvider.Firecrawl => !string.IsNullOrWhiteSpace(settings.ResolveFirecrawlApiKey()) || !IsOfficialFirecrawlEndpoint(settings.FirecrawlBaseUrl),
+            InternetSearchProvider.Firecrawl => CanCallFirecrawl(out _, out _),
             InternetSearchProvider.BraveSearch => !string.IsNullOrWhiteSpace(settings.ResolveBraveSearchApiKey()),
             InternetSearchProvider.Serper => !string.IsNullOrWhiteSpace(settings.ResolveSerperApiKey()),
             _ => false
@@ -1235,11 +1277,16 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
         {
             InternetSearchProvider.GoogleGroundedSearch => $"Missing {settings.GeminiApiKeyEnvironmentVariable} or saved Gemini API key.",
             InternetSearchProvider.Tavily => $"Missing {settings.TavilyApiKeyEnvironmentVariable} or saved Tavily API key.",
-            InternetSearchProvider.Firecrawl => $"Missing {settings.FirecrawlApiKeyEnvironmentVariable} or saved Firecrawl API key.",
+            InternetSearchProvider.Firecrawl => MissingFirecrawlConfigurationMessage(),
             InternetSearchProvider.BraveSearch => $"Missing {settings.BraveSearchApiKeyEnvironmentVariable} or saved Brave Search API key.",
             InternetSearchProvider.Serper => $"Missing {settings.SerperApiKeyEnvironmentVariable} or saved Serper API key.",
             _ => "Provider is not configured."
         };
+
+    private string MissingFirecrawlConfigurationMessage() =>
+        CanCallFirecrawl(out _, out var status)
+            ? "Firecrawl is configured."
+            : status;
 
     private static string ProviderDisplayName(InternetSearchProvider provider) =>
         provider switch

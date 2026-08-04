@@ -53,6 +53,7 @@ public sealed class LocalKnowledgeSettingsViewModel : ObservableObject
         ChooseFolderCommand = new RelayCommand(_ => ChooseFolder(), onException: HandleError);
         OpenFolderCommand = new RelayCommand(_ => OpenFolder(), onException: HandleError);
         OpenDashboardCommand = new RelayCommand(_ => OpenDashboard(), onException: HandleError);
+        ApplyEmbeddingPresetCommand = new RelayCommand(ApplyEmbeddingPreset, onException: HandleError);
         _services.Qdrant.StatusChanged += QdrantOnStatusChanged;
         Reload();
     }
@@ -72,6 +73,8 @@ public sealed class LocalKnowledgeSettingsViewModel : ObservableObject
     public string QdrantCollectionName { get => _collection; set => SetProperty(ref _collection, value); }
     public string QdrantApiKeyEnvironmentVariable { get => _apiKeyEnvironmentVariable; set => SetProperty(ref _apiKeyEnvironmentVariable, value); }
     public IReadOnlyList<string> EmbeddingProviderChoices => LocalEmbeddingProviders.Choices;
+    public IReadOnlyList<RuntimeProviderPreset> EmbeddingPresets =>
+        _services.RuntimeProviderPresets.EmbeddingPresets;
     public string EmbeddingProvider
     {
         get => _embeddingProvider;
@@ -105,6 +108,7 @@ public sealed class LocalKnowledgeSettingsViewModel : ObservableObject
     public ICommand ChooseFolderCommand { get; }
     public ICommand OpenFolderCommand { get; }
     public ICommand OpenDashboardCommand { get; }
+    public ICommand ApplyEmbeddingPresetCommand { get; }
 
     public void Reload()
     {
@@ -336,6 +340,20 @@ public sealed class LocalKnowledgeSettingsViewModel : ObservableObject
         }
 
         return configuration;
+    }
+
+    private void ApplyEmbeddingPreset(object? parameter)
+    {
+        if (parameter is not RuntimeProviderPreset preset)
+        {
+            throw new InvalidOperationException("Select an embedding endpoint preset.");
+        }
+
+        EmbeddingProvider = preset.DisplayName;
+        EmbeddingEndpoint = preset.Endpoint;
+        StatusText = string.IsNullOrWhiteSpace(preset.Endpoint)
+            ? $"{preset.DisplayName} selected. Enter the custom embedding endpoint."
+            : $"{preset.DisplayName} embedding preset applied. You can still edit the endpoint before saving.";
     }
 
     private void ChooseFolder()

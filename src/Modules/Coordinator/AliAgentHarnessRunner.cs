@@ -51,7 +51,9 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             AliCapabilityCatalog.RoslynAnalyzeProjectName,
             AliCapabilityCatalog.RoslynFormatProjectName,
             AliCapabilityCatalog.DotNetBuildName,
-            AliCapabilityCatalog.DotNetTestName
+            AliCapabilityCatalog.DotNetTestName,
+            AliCapabilityCatalog.DotNetRunName,
+            AliCapabilityCatalog.DotNetStopProjectName
         };
     private static readonly IReadOnlySet<string> CoreRecoveryToolNames =
         new HashSet<string>(CoreRecoveryCSharpToolNames, StringComparer.Ordinal)
@@ -376,14 +378,29 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             };
         }
 
+        var harnessContextWindowTokens = coreAssistantPath
+            ? Math.Min(profile.ContextTokens, Math.Max(4_096, profile.ContextTokens / 4))
+            : profile.ContextTokens;
+        var harnessOutputTokens = coreAssistantPath
+            ? Math.Min(profile.OutputTokenLimit, Math.Max(512, harnessContextWindowTokens / 4))
+            : profile.OutputTokenLimit;
+        if (harnessOutputTokens >= harnessContextWindowTokens)
+        {
+            harnessOutputTokens = Math.Max(1, harnessContextWindowTokens / 4);
+        }
+
         AIAgent agent = planningClient.AsHarnessAgent(new HarnessAgentOptions
         {
             Name = _assistantProfile.AssistantName,
             Description = "Local personal assistant with memory, current web, local library, reminders, identity, clock, private work memory, and approved workstation file tools.",
             MaximumIterationsPerRequest = MaximumToolIterations,
 #pragma warning disable MAAI001 // Agent Framework compaction controls are preview in Harness 1.15.
-            MaxContextWindowTokens = profile.ContextTokens,
-            MaxOutputTokens = profile.OutputTokenLimit,
+            // Local OpenAI-compatible runtimes can account Harmony/tool payloads much
+            // more aggressively than the framework estimator. Compact the core loop
+            // early enough that repeated source reads and edits cannot overrun the
+            // runtime's real window while work is still advancing.
+            MaxContextWindowTokens = harnessContextWindowTokens,
+            MaxOutputTokens = harnessOutputTokens,
 #pragma warning restore MAAI001
             DisableWebSearch = true,
             // Ali's store already owns stable user/conversation isolation. Supplying the
@@ -432,7 +449,11 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         + "When the request needs current, personal, stored, local, or tool-produced facts, call the relevant available tool and answer from its result; never invent evidence or falsely claim that a capability is unavailable. "
         + "Preserve every place name and geographic qualifier exactly when forming search arguments, including state and country abbreviations. "
         + "Inspect every tool result, propagate errors truthfully, and keep using appropriate tools until the request is complete or the returned evidence proves it is impossible. "
+        + "A request is not impossible merely because it contains many requirements or needs many tool calls. Decompose large work into concrete steps and keep advancing through those steps in the same request. Do not apologize for scope or give up after inspection. "
         + "Before answering, account for every explicitly requested operation and report each operation's verified success, failure, or exact unresolved obstacle. "
+        + "For C# creation, repair, build, test, launch, or stop requests, perform the requested Workspace operations with the available tools; pasted source or instructions are not a substitute for creating or changing the requested files. "
+        + "For existing source files, read only the line ranges needed and prefer targeted replace or replace-lines edits. Do not rewrite a whole existing source file with the write tool unless targeted edits have proved impossible; split genuinely large implementations into focused files. "
+        + "Never claim that Workspace GUI launch is blocked by a sandbox. When dotnet_run_project is available and launch is requested, call it and report its exact result. Never claim build, test, or launch success unless the corresponding tool returned success for the final source. "
         + "Never pause merely because a tool or protocol response is imperfect; recover, choose another available tool, ask one necessary clarification, or explain the exact obstacle. "
         + "File operations must remain inside the approved workspace exposed by the file tools. "
         + AliToolCatalog.TypoInterpretationInstruction;
@@ -862,6 +883,7 @@ internal sealed class AliAgentHarnessRunner : IDisposable
                 ? "none"
                 : string.Join(", ", semanticSelection.Tools.Select(tool => tool.Name))));
         var selectedNames = ResolveCoreToolNames(semanticSelection, out var recoverySuiteLoaded);
+        var completionGate = new CoreAssistantCompletionGate();
         if (recoverySuiteLoaded)
         {
             turn.Report(
@@ -895,6 +917,8 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         var renderedAnswer = new StringBuilder();
         var pendingShadowCalls = new PendingShadowCallTracker();
         var pendingStandingPermissions = new PendingStandingPermissionTracker();
+        string? lastBlockedFingerprint = null;
+        var completedSuccessfully = true;
         using var coreExecutionScope = AliCoreAssistantExecutionContext.Enter();
 
         try
@@ -918,6 +942,7 @@ internal sealed class AliAgentHarnessRunner : IDisposable
                                 approvalRequest = approval;
                                 break;
                             case FunctionCallContent functionCall when !functionCall.InformationalOnly:
+                                completionGate.Track(functionCall);
                                 TrackPendingShadowCall(turn, pendingShadowCalls, functionCall);
                                 var displayName = ResolveUserFacingToolName(
                                     activeTools,
@@ -928,6 +953,7 @@ internal sealed class AliAgentHarnessRunner : IDisposable
                                     $"Ali selected {displayName}.");
                                 break;
                             case FunctionResultContent functionResult:
+                                completionGate.Observe(functionResult);
                                 CompleteStandingPermission(
                                     turn,
                                     pendingStandingPermissions,
@@ -954,6 +980,33 @@ internal sealed class AliAgentHarnessRunner : IDisposable
 
                 if (approvalRequest is null)
                 {
+                    if (completionGate.TryGetBlocker(out var blocker))
+                    {
+                        renderedAnswer.Clear();
+                        if (string.Equals(
+                            lastBlockedFingerprint,
+                            blocker.Fingerprint,
+                            StringComparison.Ordinal))
+                        {
+                            completedSuccessfully = false;
+                            renderedAnswer.Append(blocker.TruthfulFailureAnswer);
+                            break;
+                        }
+
+                        lastBlockedFingerprint = blocker.Fingerprint;
+                        turn.Report(
+                            AgentActivityKind.Warning,
+                            "Continuing unfinished Workspace work",
+                            blocker.ContinuationInstruction);
+                        input =
+                        [
+                            new MeaiChatMessage(
+                                MeaiChatRole.User,
+                                blocker.ContinuationInstruction)
+                        ];
+                        continue;
+                    }
+
                     break;
                 }
 
@@ -984,7 +1037,9 @@ internal sealed class AliAgentHarnessRunner : IDisposable
                 "publication_" + turn.AssistantMessageId,
                 exactAnswer,
                 TurnStateIntegrity.Digest(exactAnswer),
-                turn.UsedEvidenceTool ? EvidenceStatus.Verified : EvidenceStatus.Unverified,
+                completedSuccessfully && turn.UsedEvidenceTool
+                    ? EvidenceStatus.Verified
+                    : EvidenceStatus.Unverified,
                 finishReason);
             var acknowledgment = await publishFinal(publication, cancellationToken)
                 .ConfigureAwait(false);
@@ -996,7 +1051,8 @@ internal sealed class AliAgentHarnessRunner : IDisposable
                 WroteAnswer: true,
                 FinishReason: finishReason,
                 Paused: false,
-                ResumeIdentity: null);
+                ResumeIdentity: null,
+                CompletedSuccessfully: completedSuccessfully);
         }
         finally
         {
@@ -1014,6 +1070,10 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             .ToHashSet(StringComparer.Ordinal);
         recoverySuiteLoaded = semanticSelection.RequiresAttention
             || selectedNames.Count == 0;
+        if (selectedNames.Overlaps(CoreRecoveryCSharpToolNames))
+        {
+            selectedNames.UnionWith(CoreRecoveryCSharpToolNames);
+        }
         if (recoverySuiteLoaded)
         {
             selectedNames.UnionWith(CoreRecoveryToolNames);
@@ -2902,7 +2962,8 @@ internal sealed record AgentHarnessRunResult(
     string? FinishReason,
     bool Paused = false,
     TurnIdentity? ResumeIdentity = null,
-    bool StructuredRecoveryRequired = false);
+    bool StructuredRecoveryRequired = false,
+    bool CompletedSuccessfully = true);
 
 internal sealed record AliHarnessResumeRequest(
     TurnIdentity DurableIdentity,

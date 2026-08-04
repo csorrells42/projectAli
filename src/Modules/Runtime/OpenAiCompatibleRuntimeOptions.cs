@@ -130,14 +130,22 @@ public static class LocalRuntimeEngines
 
     public static string Normalize(string? engine, Uri endpoint) => Normalize(engine);
 
-    public static Uri DefaultEndpoint(string engine) => Normalize(engine) switch
+    public static Uri DefaultEndpoint(string engine)
     {
-        LmStudio => new Uri("http://127.0.0.1:1234/v1/"),
-        Ollama => new Uri("http://127.0.0.1:11434/v1/"),
-        LlamaCpp => new Uri("http://127.0.0.1:8080/v1/"),
-        Lemonade => new Uri("http://127.0.0.1:13305/api/v1/"),
-        _ => new Uri("http://127.0.0.1:1234/v1/")
-    };
+        var presetId = Normalize(engine) switch
+        {
+            LmStudio => "lm-studio",
+            Ollama => "ollama",
+            LlamaCpp => "llama-cpp",
+            Lemonade => "lemonade",
+            _ => "openai-compatible-custom"
+        };
+        var preset = RuntimeProviderPresetCatalog.LoadDefault().RequireLlm(presetId);
+        return Uri.TryCreate(preset.Endpoint, UriKind.Absolute, out var endpoint)
+            ? endpoint
+            : throw new InvalidOperationException(
+                $"Runtime preset '{preset.DisplayName}' does not provide a default endpoint.");
+    }
 }
 
 public static class OllamaRuntimeSafetyPolicy

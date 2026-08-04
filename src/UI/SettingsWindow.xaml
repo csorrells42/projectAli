@@ -476,6 +476,21 @@
 
                             <StackPanel IsEnabled="{Binding IsChecked, ElementName=RuntimeAdvancedUnlockCheck}"
                                         Margin="0,0,4,0">
+                                <TextBlock Text="LLM endpoint presets" Style="{StaticResource FieldLabel}" />
+                                <ItemsControl ItemsSource="{Binding RuntimeLlmPresets}" Margin="0,3,0,8">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Button Content="{Binding DisplayName}"
+                                                    Command="{Binding DataContext.ApplyRuntimeProviderPresetCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                    CommandParameter="{Binding}"
+                                                    Margin="0,0,6,5"
+                                                    Padding="8,4" />
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
                                 <TextBlock Text="Runtime engine" Style="{StaticResource FieldLabel}" />
                                 <ComboBox ItemsSource="{Binding RuntimeEngineChoices}"
                                           SelectedItem="{Binding SelectedRuntimeEngine}"
@@ -2798,6 +2813,21 @@
                         <Border Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource BorderBrushDark}" BorderThickness="1" Padding="14" Margin="0,0,0,12">
                             <StackPanel>
                                 <TextBlock Text="Approved Library and Embeddings" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" Margin="0,0,0,10" />
+                                <TextBlock Text="Embedding endpoint presets" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" />
+                                <ItemsControl ItemsSource="{Binding EmbeddingPresets}" Margin="0,5,0,8">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Button Content="{Binding DisplayName}"
+                                                    Command="{Binding DataContext.ApplyEmbeddingPresetCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                    CommandParameter="{Binding}"
+                                                    Margin="0,0,6,5"
+                                                    Padding="8,4" />
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
                                 <Grid>
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="110" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                     <Grid.RowDefinitions>

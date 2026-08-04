@@ -79,6 +79,7 @@ public sealed class HeadlessMcpToolRuntime : IAsyncDisposable
 
         var runtimeHttpClient = LocalOnlyHttpClientFactory.Create("AliMcpHost/1.0");
         var internetHttpClient = InternetHttpClientFactory.CreateClient();
+        var internetSettings = new WebSourceBackendSettingsSnapshotOwner(dataRoot);
         var qdrant = new QdrantServiceManager(dataRoot);
         var activeUsers = new ActiveUserSession(
             dataRoot,
@@ -98,10 +99,10 @@ public sealed class HeadlessMcpToolRuntime : IAsyncDisposable
             qdrant: qdrant);
         var webSources = new TavilyFirecrawlSourceRetriever(
             internetHttpClient,
-            () => WebSourceBackendSettingsStore.LoadOrDefault(dataRoot),
+            () => internetSettings.Capture().Settings,
             dataRoot: dataRoot);
         var webResearch = new McpWebResearchClient(
-            () => WebSourceBackendSettingsStore.LoadOrDefault(dataRoot));
+            () => internetSettings.Capture().Settings);
         var toolFactory = new AliMcpServerToolFactory(
             localLibrary,
             webSources,
@@ -110,7 +111,8 @@ public sealed class HeadlessMcpToolRuntime : IAsyncDisposable
             reminders,
             profile,
             codingModule,
-            fileAccess);
+            fileAccess,
+            () => internetSettings.Capture().Settings);
         var capabilitySettings = toolFactory.CreateCapabilitySettingsOwner(dataRoot, settings);
         Func<string> invocationBoundaryRevisionAccessor = () =>
             McpPersistedSecurityBoundaryRevision.Capture(dataRoot, hostConfigurationPath);

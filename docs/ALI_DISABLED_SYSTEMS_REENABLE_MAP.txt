@@ -1,0 +1,521 @@
+c
+Captured: 2026-08-04 (America/Chicago)
+Branch: codex/checkpoint-13-integration
+Baseline commit: 1ddfef2 (Restore Ali core truth reliability and speed)
+
+PURPOSE
+-------
+This file records the systems that were bypassed, narrowed, hidden, or removed
+from Ali's normal request path while restoring the three core priorities:
+
+    TRUTH + RELIABILITY + SPEED
+
+The hardened code was preserved. Most of it is still in the repository and can
+be re-enabled one piece at a time. Do not switch everything on at once. After
+each item is restored, repeat the live acceptance gates at the end of this file.
+
+Line numbers below describe the exact working tree on the capture date. If code
+above a location changes, search for the named symbol because the line number
+may move.
+
+Quick reference to the pre-fast-core implementation of a file:
+
+    git show 1ddfef2^:path/to/file
+
+
+CURRENT LIVE BASELINE - DO NOT REGRESS
+======================================
+PASS - Tic-Tac-Toe:
+  Build log:
+  C:\Users\clsor\AppData\Local\AliFiles\Data\Logs\BuildLogs\20260804-082503294-TicTacToe-Debug.log
+  Result: build succeeded, 0 warnings, 0 errors, 1.96 seconds.
+  Ali created a WPF project and its source under Data\Workspace\TicTacToe.
+
+IMPORTANT CAVEAT:
+  MainWindow.xaml.cs was written again after that successful build. Therefore
+  the final on-disk source revision was not proven by that earlier build. The
+  acceptance gate must always require a successful build AFTER the last source
+  mutation.
+
+FAIL - newer Chess attempt:
+  20260804-083355069-Chess-Debug.log failed with CS8070.
+  20260804-083402725-Chess-Debug.log failed with CS0111.
+  Ali attempted a repair, but the second build still failed. Source was edited
+  again after the last build, with no later successful build in the log folder.
+  Ali must never label such a run complete. A failed final build must cause
+  continued repair or a truthful, explicit unresolved-failure answer.
+
+
+1. FULL CP7/CP8 DURABLE ORCHESTRATION LOOP
+==========================================
+Current location:
+  src\Modules\Coordinator\AliAgentHarnessRunner.cs:711-737
+  Fast implementation: same file:832-1005
+  Preserved durable implementation begins near same file:1025
+
+Current state:
+  Normal RunAsync calls RunCoreAssistantAsync. The full durable planning/state,
+  protocol, recovery, execution-grant, and completion-critic path is not used by
+  an ordinary new turn.
+
+Manual re-enable:
+  At line 724, replace the RunCoreAssistantAsync call with the pre-1ddfef2
+  RunCoreAsync call:
+
+    RunCoreAsync(turn, userText, history, attachments, publishFinal,
+        resumeRequest: null, structuredRecoveryRequest: null, cancellationToken)
+
+  Restore only after the smaller systems below have passed independently.
+
+Must happen first:
+  - Hello and ordinary chat cannot pause on protocol formatting.
+  - Weather and C# create/edit/build/test must complete end to end.
+  - No foreground disk read/write may block a response.
+  - Orchestration and security must each remain <=25% of model round-trip time.
+  - A failed tool/build must propagate and keep the work loop alive.
+
+
+2. PAUSED-TURN AUTO-RESUME
+==========================
+Current locations:
+  src\Modules\Coordinator\AliToolCoordinator.cs:450-456
+  src\Modules\Coordinator\AliAgentHarnessRunner.cs:706-709
+  Resume methods remain at AliAgentHarnessRunner.cs:739-829
+
+Current state:
+  The coordinator no longer calls FindPausedTurnAsync before each normal turn.
+  Each new message enters the fast RunAsync path.
+
+Manual re-enable:
+  Restore the pre-1ddfef2 FindPausedTurnAsync call in AliToolCoordinator and the
+  conditional choice between ResumeAsync and RunAsync.
+
+Must happen first:
+  - Recovery automatically advances toward the goal instead of behaving like a
+    DVD pause.
+  - Restart and power-loss recovery have a live passing scenario.
+  - A stale recovered turn cannot hijack a new unrelated message.
+
+
+3. TOOL INVENTORY NARROWED TO WEATHER + ESSENTIAL C#
+====================================================
+Current locations:
+  src\Modules\Coordinator\AliAgentHarnessRunner.cs:46-60
+  Selection/filter: same file:841-881
+  Recovery-suite fallback: same file:1007-1021
+
+Current state:
+  The complete production tool inventory is captured at startup, but only these
+  tools may reach the model on the fast path:
+
+  - search_current_web
+  - coding_inspect_project
+  - dotnet_create_project
+  - roslyn_analyze_project
+  - roslyn_format_project
+  - dotnet_build_project
+  - dotnet_test_project
+
+  Memory, reminders, calendar, navigation, identity, broader file/archive
+  operations, process control, broader Roslyn tools, agents, and other MCP tools
+  are dormant because the core allowlist excludes them.
+
+Manual re-enable:
+  Add tool names to CoreRecoveryToolNames one semantic drawer at a time, or
+  switch back to the full durable path after it passes. Keep semantic drawer
+  selection bounded; do not send the entire schema library to the model.
+
+Must happen first for every added drawer:
+  - Its tool objects/schemas are already resident in RAM at startup.
+  - Settings changes republish one RAM snapshot; ordinary turns do not reread.
+  - Offline optional services fail quickly without blocking chat.
+  - The model can select, execute, inspect the result, and recover from failure.
+  - Re-run the speed and truth gates before adding the next drawer.
+
+
+4. WORK MEMORY AND CAPABILITY ENFORCEMENT PROVIDERS
+===================================================
+Current locations:
+  src\Modules\Coordinator\AliAgentHarnessRunner.cs:338-358
+  Core agent creation: same file:884-892
+
+Current state:
+  In core mode the Agent Framework skills source is not created, the work-memory
+  context provider is not added, and terminal capability enforcement is forced
+  to null.
+
+Manual re-enable:
+  Re-enable one provider at a time by removing its !coreAssistantPath guard, or
+  use coreAssistantPath:false only after the durable path passes.
+
+Must happen first:
+  Provider state must be RAM-resident and captured without disk/network waits.
+  Each provider must independently stay within the <=25% overhead budget and
+  must not prevent a truthful fallback answer.
+
+
+5. INTERNAL TOOL PERMISSION / APPROVAL GATES
+============================================
+Current locations:
+  src\Modules\Coordinator\AliAgentHarnessRunner.cs:875-880
+  src\Modules\Coordinator\AliAgentHarnessRunner.cs:402-412
+  src\Modules\Permissions\AliToolPermissionPolicy.cs:212-213
+
+Current state:
+  Core tools use ProjectWithoutApproval(). Framework read/write approval is
+  disabled in core mode. The operating-system boundary and Workspace path
+  validation remain active.
+
+Manual re-enable:
+  - Stop calling ProjectWithoutApproval(); use the normal permission projection.
+  - Restore capability enforcement.
+  - Set DisableReadOnlyToolApproval and DisableWriteToolApproval to false.
+  - Route mutations through a valid execution authority before removing the
+    fast-core execution scope.
+
+Must happen first:
+  Permissions must load once into RAM at boot. Ordinary permitted Workspace work
+  must proceed without repeated prompts, while outside-Workspace access must
+  fail truthfully and quickly.
+
+
+6. AGENT SKILLS PROVIDER AND OPENTELEMETRY
+==========================================
+Current locations:
+  src\Modules\Coordinator\AliAgentHarnessRunner.cs:393-395
+
+Current state:
+  DisableAgentSkillsProvider and DisableOpenTelemetry are true in core mode.
+
+Manual re-enable:
+  Change each setting independently to false for the core path.
+
+Must happen first:
+  Skills must be loaded/cached at boot. Telemetry must be queued/background-only.
+  Neither may add material response latency or become a failure dependency.
+
+
+7. INCOMING / EXTERNAL MCP DISCOVERY
+====================================
+Current locations:
+  src\Modules\Coordinator\AliAgentHarnessRunner.cs:440-455
+  src\Modules\Coordinator\AliAgentHarnessRunner.cs:1042-1046
+
+Current state:
+  Core capability state publishes no ready incoming MCP tools. Even the preserved
+  durable path currently uses McpToolSession.Empty rather than performing live
+  incoming MCP discovery on the request path.
+
+Manual re-enable:
+  Do not restore per-turn MCP connection/discovery. First create a RAM-resident
+  MCP session/catalog at startup and refresh it only when MCP settings change.
+  Then capture that snapshot at the current McpToolSession.Empty call site.
+
+Must happen first:
+  MCP offline/unavailable behavior must never delay general chat. Stale/unsafe
+  declarations must be withheld without removing healthy local tools.
+
+
+8. COMPLETION CRITIC
+====================
+Current locations:
+  src\Modules\Coordinator\AliAgentHarnessRunner.cs:1251-1268
+  Direct answer digest/publication: same file:969-993
+
+Current state:
+  The fast core bypasses the completion critic. The preserved planner is also
+  constructed with completionCritic:null.
+
+Manual re-enable:
+  Restore AliCompletionCritic construction and pass it to the planning client,
+  after routing normal turns through the durable planner.
+
+Must happen first:
+  It must catch the observed Chess false-completion case: two failed builds and
+  no later passing build can never produce a successful completion. It must add
+  measurable truth/reliability value and remain within the latency budget.
+
+
+9. FAST-CORE EXECUTION SCOPE / DURABLE GRANT BYPASS
+===================================================
+Current locations:
+  src\Modules\Coordinator\AliCoreAssistantExecutionContext.cs:3-17
+  Entered at src\Modules\Coordinator\AliAgentHarnessRunner.cs:898
+
+Current state:
+  AsyncLocal marks the core model/tool loop as the temporary journal-free path.
+  Several coding/file audit systems use IsActive to bypass their normal durable
+  wrapper or disk audit write.
+
+Manual re-enable:
+  DO NOT simply remove AliCoreAssistantExecutionContext.Enter(). First restore a
+  valid durable planner/action authority, then remove the scope and its IsActive
+  branches. Removing only the scope will make current mutation wrappers fail
+  closed because they will expect grants the fast path never created.
+
+Must happen first:
+  Every mutation has a valid call-bound authority, and create/edit/build/test
+  recovery passes without awaiting journal disk I/O before visible progress.
+
+
+10. C# DURABLE EXECUTION ADAPTERS
+=================================
+Current locations:
+  src\Modules\Coding\AliCodingModule.cs:554-644
+  IsActive branches start at lines 558, 569, 580, 592, 604, 616, and 628.
+
+Current state:
+  Create, format, build, run, stop, test, and verify call raw implementations in
+  core mode instead of CodingExecution.Execute* durable wrappers.
+
+Manual re-enable:
+  Remove the IsActive ? raw : durable branches and restore the pre-1ddfef2 bodies
+  that always call CodingExecution.Execute*Async.
+
+Must happen first:
+  Durable turn/call grants must exist. A live create-edit-build-test run must
+  repair compiler errors until the final build passes or report exact failure.
+  Journal persistence cannot block tool completion or UI progress.
+
+
+11. WORKSTATION FILE-TREE DURABLE BROKER
+========================================
+Current locations:
+  src\Modules\FileAccess\AliWorkstationFileAccess.cs:265-289
+  Current constructor return begins at line 285.
+
+Current state:
+  CreateDefault uses the three-argument non-durable AliWorkstationFileAccess
+  constructor. The durable orchestration root and assistant binding parameters
+  are ignored; the durable tree-mutation broker is therefore absent.
+
+Manual re-enable:
+  Keep the Workspace-only mount, but restore the durable constructor call using:
+
+  - durableOrchestrationRoot ?? Path.Combine(userDataRoot, "OrchestrationV2")
+  - the stable assistant profile binding used before 1ddfef2
+
+Must happen first:
+  Broker/journal work must be asynchronous or outside the foreground tool path.
+  Workspace-only mutation, rollback, restart, and recovery tests must pass.
+
+
+12. FILE AND C# AUDIT LOG WRITES
+================================
+Current locations:
+  src\Modules\FileAccess\AgentFileActionAuditStore.cs:37-47
+  src\Modules\Coding\AliDotNetProjectScaffolder.cs:231-243
+  src\Modules\Coding\AliRoslynCodingTools.cs:1557-1569
+
+Current state:
+  These methods immediately return while AliCoreAssistantExecutionContext is
+  active, so file-action, project-create, and Roslyn/MSBuild JSONL audit writes
+  are skipped on the core path.
+
+Manual re-enable:
+  Remove the IsActive early returns only after replacing direct disk appends with
+  a bounded background channel/writer. The tool path should enqueue a tiny
+  in-memory record and continue.
+
+Must happen first:
+  Queue saturation and writer failure are observable, the queue is bounded, and
+  no request/tool completion awaits disk I/O.
+
+
+13. TOOL-OUTCOME EVIDENCE JOURNAL IS NOT ACTUALLY DISABLED
+==========================================================
+Current locations:
+  src\AliServices.cs:489-492
+  src\Modules\Coordinator\AliAgentHarnessRunner.cs:930-939
+
+Current state:
+  ShadowToolObservationService is still composed over EvidenceLedger. Core tool
+  results call TryObserveFrameworkResult. This uses a nonblocking channel write,
+  so the tool thread does not directly await disk, but the background evidence
+  journal still creates evidence.journal.jsonl, payload, index, and manifest
+  files. Live Tic-Tac-Toe/Chess runs proved those files are still being written.
+
+Manual disable (if desired):
+  Remove/disable the shadow observer composition or skip TryObserveFrameworkResult
+  in core mode. Preserve the minimum in-memory truth record: input, output, tool,
+  success/failure, and final verified outcome.
+
+Manual re-enable later:
+  Restore the observer after the background writer proves it cannot backpressure
+  the model/tool loop and after its value justifies its RAM/disk cost.
+
+Must happen first:
+  No critical-path waits, bounded memory, graceful drop/degrade behavior, and a
+  live latency comparison with the observer enabled and disabled.
+
+
+14. FINAL ANSWER DURABILITY / CONVERSATION SAVE
+===============================================
+Current locations:
+  src\Modules\Coordinator\AliToolCoordinator.cs:424-447
+  Display-only disposition selected at line 431.
+  src\Modules\Coordinator\FinalAnswerPublicationBoundary.cs:7-228
+  src\UI\ViewModels\MainWindowViewModel.cs:2827-2885
+  Teardown save gate: MainWindowViewModel.cs:2998-3001
+  Helper: MainWindowViewModel.cs:3557-3560
+
+Current state:
+  An ordinary successful answer is accepted when displayed in memory, not when
+  the conversation store has persisted it. Once display is acknowledged,
+  teardown skips SaveActiveConversation. A restart can therefore lose it.
+
+Manual re-enable:
+  Construct new FinalAnswerPublicationDelivery(publication) without the
+  DisplayedInMemory override. The existing UI RequiresPersistence branch will
+  save and verify the exact assistant message before acknowledging it.
+
+Must happen first:
+  Move save work off the visible-answer critical path, or prove it meets the
+  budget. Verify restart/power-loss recovery and truthful save-failure status.
+
+
+15. MEMORY / REMINDER UI REFRESH ON TURN TEARDOWN
+=================================================
+Current locations:
+  src\UI\ViewModels\MainWindowViewModel.cs:2998-3004
+  Refresh method remains near MainWindowViewModel.cs:3562
+
+Current state:
+  Ordinary turns no longer call RefreshMemoryReminders at teardown because that
+  method rereads legacy storage on the response path.
+
+Manual re-enable:
+  Do not restore the synchronous call. Publish RAM snapshots from the background
+  memory/reminder services and bind the UI to the snapshot/event.
+
+Must happen first:
+  Mem0/Qdrant health is real, recall/mutation relevance gates pass, and all disk/
+  embedding work remains background-only.
+
+
+16. IMAGE ATTACHMENTS / VISION UI
+=================================
+Current locations:
+  Forced empty dispatch:
+    src\UI\ViewModels\MainWindowViewModel.cs:2662-2665
+  Attachment preview removed around:
+    src\UI\MainWindow.xaml:858-870
+  Attach button removed around:
+    src\UI\MainWindow.xaml:1048-1079
+  Ctrl+V image handler removed around:
+    src\UI\MainWindow.xaml.cs:114-127
+  Preserved implementation remains:
+    src\UI\ViewModels\MainWindowViewModel.cs:5640-5746
+
+Current state:
+  Text requests always send empty attachment and attachment-metadata lists. The
+  paste button, preview cards, and Ctrl+V image path are absent from the UI.
+
+Manual re-enable:
+  Restore Attachments.Select(ToCoreAttachment), metadata projection, XAML preview
+  and button, and the pre-1ddfef2 Ctrl+V branch.
+
+Must happen first:
+  Vision capability probing, image resize/token/byte bounds, clean fallback on a
+  text-only model, and proof that attachment failure cannot block text chat.
+
+
+17. WORKSPACE-ONLY FILE SCOPE
+=============================
+Current locations:
+  src\Modules\FileAccess\AliWorkstationFileAccess.cs:254-289
+  Workspace-only instructions begin at line 255.
+
+Current state:
+  Only Workspace is mounted. Desktop, Documents, Downloads, and Exports mounts
+  were removed. Recoverable trash is Workspace\.ali-trash.
+
+Manual re-enable:
+  Do not reverse under the current instruction. If policy changes later, load
+  additional mount roots from configuration and add them explicitly. Do not put
+  mutable paths back into source code.
+
+Must happen first:
+  Explicit user authorization, external configuration, path-boundary tests, and
+  a reliable permission snapshot.
+
+
+18. PARTICIPANT MEMORY, CALENDAR, AND OTHER PRESERVED ADAPTERS
+==============================================================
+Current state:
+  Their implementation was preserved. They are dormant because their tool names
+  are excluded by CoreRecoveryToolNames and the fast path has no durable planner
+  authority. They do not require internal code reversal.
+
+Manual re-enable:
+  Add the appropriate semantic drawer/tool names only after the service-specific
+  prerequisites pass, then restore durable mutation authority for mutations.
+
+Must happen first:
+  - Memory: healthy Mem0/Qdrant, stable fact remembered, transient fact rejected,
+    new-chat recall, participant privacy/consent for mutations.
+  - Calendar/reminders: service availability, idempotency, and truthful failure.
+  - Broader tools: offline-safe behavior and independent live acceptance.
+
+
+SYSTEMS THAT ARE ACTIVE AND SHOULD NOT BE ACCIDENTALLY REMOVED
+==============================================================
+- Semantic tool selection is active and should remain the bounded selection
+  mechanism. The model still chooses whether and how to use the selected tool.
+- All startup assistant tool objects are retained in RAM; the core allowlist is
+  the reachability filter.
+- Workspace path validation and operating-system permissions remain active.
+- Current web search is active.
+- Essential C# project creation, file operations, Roslyn analysis/formatting,
+  build, and test are active through the fast core.
+- Read-only current web/RAG/memory operations should not be forced through
+  mutation journals merely to restore durability. Only actual mutations need a
+  durable mutation boundary.
+- Planner fixes for exact semantic drawer IDs and corrected token accounting are
+  preserved but dormant until the full planner is selected. Do not revert them.
+
+
+RECOMMENDED RE-ENABLE ORDER
+===========================
+1. Fix false completion: a failed final tool/build cannot report success.
+2. Keep all core tools/startup configuration RAM-resident.
+3. Re-enable participant memory recall (read-only), then background mutation.
+4. Add async conversation persistence and minimum receipts.
+5. Add each additional read-only semantic drawer independently.
+6. Add bounded background audit/evidence writing.
+7. Restore permission projection with RAM snapshots and no repeated prompts.
+8. Restore durable mutation brokers one domain at a time.
+9. Restore restart/power-loss recovery and paused-turn resume.
+10. Restore completion critic only if it improves truth within the budget.
+11. Restore incoming MCP from a startup-cached catalog.
+12. Restore attachments/vision after text-only behavior remains unchanged.
+13. Select the full durable orchestration path only after every constituent lane
+    has already passed independently.
+
+
+LIVE ACCEPTANCE GATES AFTER EVERY RE-ENABLE
+===========================================
+Truth:
+  - A failed build/tool can never be reported as successful completion.
+  - Current facts use returned evidence; no made-up tool results.
+  - Ali states the exact unresolved obstacle only after recovery is exhausted.
+
+Reliability:
+  - "hello" answers normally.
+  - current Andalusia, Alabama weather uses the web tool and returns sources.
+  - create a C# app, write every requested file, build after the final edit,
+    repair errors, and finish only after a passing final build.
+  - stable memory is recalled in a new chat; transient trivia is rejected.
+  - an offline optional service does not stop general chat or C# work.
+
+Speed:
+  - No foreground disk read/write blocks text or tool progress.
+  - Orchestration <=25% of model round-trip time.
+  - Security <=25% of model round-trip time.
+  - Time to first visible token and total turn time do not regress from the fast
+    core baseline without a measured, explicitly accepted reason.
+
+Rollback rule:
+  If one restored system breaks truth, reliability, or speed, disable only that
+  system again, preserve its code, record the failure, and continue from the
+  last passing checkpoint.

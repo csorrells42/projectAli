@@ -846,8 +846,11 @@ public sealed class AliToolCallingChatClientTests
             && item.Text.Contains('s'));
     }
 
-    [Fact]
-    public async Task PegNativeStructuredDecoderFailure_RetriesWithoutServerGrammarAndValidatesLocally()
+    [Theory]
+    [InlineData("HTTP 500: The model produced output that does not match the expected peg-native format")]
+    [InlineData("HTTP 400: Engine protocol predict request returned 400: Failed to process regex")]
+    public async Task StructuredDecoderFailure_RetriesWithoutServerGrammarAndValidatesLocally(
+        string failureMessage)
     {
         var activity = new List<AssistantStreamChunk>();
         var turn = new CoordinatorTurnContext(
@@ -856,7 +859,7 @@ public sealed class AliToolCallingChatClientTests
             "assistant-message",
             "Finish the current job.",
             activity.Add);
-        using var inner = new PegFailureThenSuccessChatClient();
+        using var inner = new PegFailureThenSuccessChatClient(failureMessage);
         using var client = new AliToolCallingChatClient(
             inner,
             new DevelopmentLocalModelRuntime(),
@@ -2448,7 +2451,7 @@ public sealed class AliToolCallingChatClientTests
                 "Build drawer found."));
     }
 
-    private sealed class PegFailureThenSuccessChatClient : IChatClient
+    private sealed class PegFailureThenSuccessChatClient(string failureMessage) : IChatClient
     {
         public int CallCount { get; private set; }
 
@@ -2463,8 +2466,7 @@ public sealed class AliToolCallingChatClientTests
             Formats.Add(options?.ResponseFormat);
             if (CallCount == 1)
             {
-                throw new InvalidOperationException(
-                    "HTTP 500: The model produced output that does not match the expected peg-native format");
+                throw new InvalidOperationException(failureMessage);
             }
 
             return Task.FromResult(new ChatResponse(new AIChatMessage(

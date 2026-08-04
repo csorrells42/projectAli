@@ -18,6 +18,7 @@ public sealed record McpWebResearchResult(
 public sealed class McpWebResearchClient(Func<WebSourceBackendSettings> settingsProvider)
 {
     private const int MaximumResultCharacters = 12_000;
+    private const string ApiKeyPlaceholder = "{apiKey}";
 
     public async Task<McpWebResearchResult> ResearchAsync(
         string query,
@@ -30,33 +31,75 @@ public sealed class McpWebResearchClient(Func<WebSourceBackendSettings> settings
             return Failure("MCP", "Provider-managed research is disabled in Internet settings.");
         }
 
+        var timeoutSeconds = settings.McpResearchTimeoutSeconds;
+        var timeout = TimeSpan.FromSeconds(timeoutSeconds);
+        if (timeoutSeconds <= 0 || timeout.TotalMilliseconds > uint.MaxValue - 1d)
+        {
+            return Failure(
+                "MCP",
+                $"Configured MCP research timeout '{timeoutSeconds}' seconds cannot be honored; no request was sent.");
+        }
+
+        using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutSource.CancelAfter(timeout);
+        var requestToken = timeoutSource.Token;
+        McpWebResearchResult? lastFailure = null;
+
         var firecrawlKey = settings.ResolveFirecrawlApiKey();
         if (!string.IsNullOrWhiteSpace(firecrawlKey))
         {
-            var firecrawl = await TryCallAsync(
-                "Firecrawl MCP",
-                new Uri($"https://mcp.firecrawl.dev/{Uri.EscapeDataString(firecrawlKey)}/v2/mcp"),
-                ["firecrawl_deep_research", "firecrawl_agent", "firecrawl_search"],
-                query,
-                cancellationToken).ConfigureAwait(false);
-            if (firecrawl.Succeeded)
+            if (!TryBuildConfiguredEndpoint(
+                    settings.FirecrawlMcpEndpointTemplate,
+                    firecrawlKey,
+                    nameof(settings.FirecrawlMcpEndpointTemplate),
+                    out var firecrawlEndpoint,
+                    out var firecrawlConfigurationFailure))
             {
-                return firecrawl;
+                lastFailure = Failure("Firecrawl MCP", firecrawlConfigurationFailure);
+            }
+            else
+            {
+                var firecrawl = await TryCallAsync(
+                    "Firecrawl MCP",
+                    firecrawlEndpoint!,
+                    ["firecrawl_deep_research", "firecrawl_agent", "firecrawl_search"],
+                    query,
+                    settings,
+                    requestToken).ConfigureAwait(false);
+                if (firecrawl.Succeeded)
+                {
+                    return firecrawl;
+                }
+
+                lastFailure = firecrawl;
             }
         }
 
         var tavilyKey = settings.ResolveTavilyApiKey();
         if (!string.IsNullOrWhiteSpace(tavilyKey))
         {
+            if (!TryBuildConfiguredEndpoint(
+                    settings.TavilyMcpEndpointTemplate,
+                    tavilyKey,
+                    nameof(settings.TavilyMcpEndpointTemplate),
+                    out var tavilyEndpoint,
+                    out var tavilyConfigurationFailure))
+            {
+                return Failure("Tavily MCP", tavilyConfigurationFailure);
+            }
+
             return await TryCallAsync(
-                "Tavily MCP",
-                new Uri($"https://mcp.tavily.com/mcp/?tavilyApiKey={Uri.EscapeDataString(tavilyKey)}"),
-                ["tavily-search", "tavily_search"],
-                query,
-                cancellationToken).ConfigureAwait(false);
+                    "Tavily MCP",
+                    tavilyEndpoint!,
+                    ["tavily-search", "tavily_search"],
+                    query,
+                    settings,
+                    requestToken)
+                .ConfigureAwait(false);
         }
 
-        return Failure("MCP", "No Firecrawl or Tavily API key is configured for MCP research.");
+        return lastFailure
+               ?? Failure("MCP", "No Firecrawl or Tavily API key is configured for MCP research.");
     }
 
     private static async Task<McpWebResearchResult> TryCallAsync(
@@ -64,6 +107,7 @@ public sealed class McpWebResearchClient(Func<WebSourceBackendSettings> settings
         Uri endpoint,
         IReadOnlyList<string> allowedToolNames,
         string query,
+        WebSourceBackendSettings settings,
         CancellationToken cancellationToken)
     {
         try
@@ -87,7 +131,7 @@ public sealed class McpWebResearchClient(Func<WebSourceBackendSettings> settings
                 return Failure(provider, "The remote MCP server did not advertise an allowlisted research tool.");
             }
 
-            var arguments = BuildArguments(selected.Name, query);
+            var arguments = BuildArguments(selected.Name, query, settings);
             var result = await client.CallToolAsync(
                 selected.Name,
                 arguments,
@@ -121,7 +165,10 @@ public sealed class McpWebResearchClient(Func<WebSourceBackendSettings> settings
         }
     }
 
-    private static Dictionary<string, object?> BuildArguments(string toolName, string query)
+    private static Dictionary<string, object?> BuildArguments(
+        string toolName,
+        string query,
+        WebSourceBackendSettings settings)
     {
         var arguments = new Dictionary<string, object?>
         {
@@ -129,11 +176,49 @@ public sealed class McpWebResearchClient(Func<WebSourceBackendSettings> settings
         };
         if (toolName.Contains("search", StringComparison.OrdinalIgnoreCase))
         {
-            arguments["max_results"] = 8;
-            arguments["search_depth"] = "advanced";
+            arguments["max_results"] = settings.MaxSearchResults;
+            arguments["search_depth"] = settings.TavilySearchDepth;
         }
 
         return arguments;
+    }
+
+    private static bool TryBuildConfiguredEndpoint(
+        string? configuredTemplate,
+        string apiKey,
+        string settingName,
+        out Uri? endpoint,
+        out string failure)
+    {
+        endpoint = null;
+        if (string.IsNullOrWhiteSpace(configuredTemplate))
+        {
+            failure = $"Internet setting '{settingName}' is not configured; no request was sent.";
+            return false;
+        }
+
+        var template = configuredTemplate.Trim();
+        if (!template.Contains(ApiKeyPlaceholder, StringComparison.Ordinal))
+        {
+            failure =
+                $"Internet setting '{settingName}' must contain the '{ApiKeyPlaceholder}' placeholder; no request was sent.";
+            return false;
+        }
+
+        var rendered = template.Replace(
+            ApiKeyPlaceholder,
+            Uri.EscapeDataString(apiKey),
+            StringComparison.Ordinal);
+        if (!Uri.TryCreate(rendered, UriKind.Absolute, out endpoint)
+            || !string.Equals(endpoint.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        {
+            endpoint = null;
+            failure = $"Internet setting '{settingName}' must produce an absolute HTTPS URL; no request was sent.";
+            return false;
+        }
+
+        failure = string.Empty;
+        return true;
     }
 
     private static string Bound(string? value)

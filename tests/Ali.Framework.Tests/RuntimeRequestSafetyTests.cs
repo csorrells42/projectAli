@@ -1,5 +1,6 @@
 using Ali.Modules.Coordinator;
 using System.Text.Json;
+using Ali.Modules.Coding;
 using Ali.Modules.Mcp;
 using Ali.Modules.Capabilities;
 using Ali.Modules.Orchestration.Contracts;
@@ -158,6 +159,51 @@ public sealed class RuntimeRequestSafetyTests
             item.ActivityKind == AgentActivityKind.Warning
             && item.ExecutionReceipt?.Outcome == AgentToolExecutionOutcome.Failed
             && item.ExecutionReceipt.Summary.Contains("outcome is unknown", StringComparison.Ordinal));
+        Assert.DoesNotContain(activity, item =>
+            item.ExecutionReceipt?.Outcome == AgentToolExecutionOutcome.Completed);
+        Assert.DoesNotContain(activity, item =>
+            item.Text.Contains("completed", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task TypedFailedBuild_ProducesFailedReceiptWithoutChangingResult()
+    {
+        var activity = new List<AssistantStreamChunk>();
+        var turn = CreateObservedTurn(
+            "call-build-failed",
+            AliCapabilityCatalog.DotNetBuildName,
+            activity.Add);
+        using var invocation = EnterInvocation(
+            turn,
+            "call-build-failed",
+            AliCapabilityCatalog.DotNetBuildName);
+        var failure = new DotNetBuildResult(
+            false,
+            "App.csproj",
+            "Release",
+            1,
+            "Build failed with CS1002.",
+            "CS1002: ; expected",
+            null,
+            10,
+            ErrorCount: 1);
+        object serializedFailure = JsonSerializer.SerializeToElement(failure);
+        var inner = new FixedResultAIFunction(
+            AIFunctionFactory.Create(
+                () => "unused",
+                AliCapabilityCatalog.DotNetBuildName,
+                "Build a Workspace project."),
+            serializedFailure);
+        var wrapped = new ActivityReportingAIFunction(inner, () => turn);
+
+        var result = await wrapped.InvokeAsync(
+            new AIFunctionArguments(),
+            TestContext.Current.CancellationToken);
+
+        Assert.Same(serializedFailure, result);
+        Assert.Contains(activity, item =>
+            item.ActivityKind == AgentActivityKind.Warning
+            && item.ExecutionReceipt?.Outcome == AgentToolExecutionOutcome.Failed);
         Assert.DoesNotContain(activity, item =>
             item.ExecutionReceipt?.Outcome == AgentToolExecutionOutcome.Completed);
         Assert.DoesNotContain(activity, item =>

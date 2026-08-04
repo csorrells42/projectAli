@@ -30,8 +30,11 @@ public sealed class AliServices
     private readonly HttpClient _runtimeHttpClient;
     private readonly HttpClient _remoteRuntimeHttpClient;
     private readonly HttpClient _internetHttpClient;
-    private readonly RuntimeCredentialStore _runtimeCredentials;
+    private readonly RuntimeCredentialSnapshotOwner _runtimeCredentials;
     private readonly RuntimeCapabilityProfileStore _runtimeCapabilityProfiles;
+    private readonly OpenAiCompatibleRuntimeOptionsSnapshotOwner _runtimeSettings;
+    private readonly WebSourceBackendSettingsSnapshotOwner _internetSettings;
+    private readonly UserMemorySettingsSnapshotOwner _userMemorySettings;
     private readonly LocalVectorLibrarySettingsSnapshotOwner _localVectorLibrarySettings;
 
     public AliServices(
@@ -55,6 +58,11 @@ public sealed class AliServices
         McpServerHost mcpServer,
         QdrantServiceManager qdrant,
         LocalVectorLibrarySettingsSnapshotOwner localVectorLibrarySettings,
+        OpenAiCompatibleRuntimeOptionsSnapshotOwner runtimeSettings,
+        WebSourceBackendSettingsSnapshotOwner internetSettings,
+        UserMemorySettingsSnapshotOwner userMemorySettings,
+        RuntimeCredentialSnapshotOwner runtimeCredentials,
+        RuntimeProviderPresetCatalog runtimeProviderPresets,
         IActiveUserSession activeUsers,
         ParticipantPresenceSnapshotBridge participantPresence,
         Mem0UserMemoryService userMemories,
@@ -74,7 +82,8 @@ public sealed class AliServices
         _runtimeHttpClient = runtimeHttpClient;
         _remoteRuntimeHttpClient = remoteRuntimeHttpClient;
         _internetHttpClient = internetHttpClient;
-        _runtimeCredentials = new RuntimeCredentialStore(DataRoot);
+        _runtimeCredentials = runtimeCredentials
+            ?? throw new ArgumentNullException(nameof(runtimeCredentials));
         _runtimeCapabilityProfiles = new RuntimeCapabilityProfileStore(DataRoot);
         VoiceRecorder = voiceRecorder;
         SpeechToText = speechToText;
@@ -88,6 +97,14 @@ public sealed class AliServices
         Qdrant = qdrant;
         _localVectorLibrarySettings = localVectorLibrarySettings
             ?? throw new ArgumentNullException(nameof(localVectorLibrarySettings));
+        _runtimeSettings = runtimeSettings
+            ?? throw new ArgumentNullException(nameof(runtimeSettings));
+        _internetSettings = internetSettings
+            ?? throw new ArgumentNullException(nameof(internetSettings));
+        _userMemorySettings = userMemorySettings
+            ?? throw new ArgumentNullException(nameof(userMemorySettings));
+        RuntimeProviderPresets = runtimeProviderPresets
+            ?? throw new ArgumentNullException(nameof(runtimeProviderPresets));
         ActiveUsers = activeUsers;
         ParticipantPresence = participantPresence;
         UserMemories = userMemories;
@@ -181,11 +198,13 @@ public sealed class AliServices
 
     public GoogleBillingSettingsGuard GoogleBillingGuard { get; }
 
+    public RuntimeProviderPresetCatalog RuntimeProviderPresets { get; }
+
     public OpenAiCompatibleRuntimeOptions LoadRuntimeSettings() =>
-        RuntimeSettingsStore.LoadOrDefault(DataRoot);
+        _runtimeSettings.Capture().Settings;
 
     public void SaveRuntimeSettings(OpenAiCompatibleRuntimeOptions options) =>
-        RuntimeSettingsStore.Save(DataRoot, options);
+        _runtimeSettings.Save(options);
 
     public string? LoadRuntimeApiKey() =>
         _runtimeCredentials.LoadApiKey();
@@ -219,10 +238,10 @@ public sealed class AliServices
         new(DataRoot, _runtimeHttpClient, _localVectorLibrarySettings, Qdrant);
 
     public UserMemorySettings LoadUserMemorySettings() =>
-        UserMemorySettingsStore.LoadOrDefault(DataRoot);
+        _userMemorySettings.Capture().Settings;
 
     public void SaveUserMemorySettings(UserMemorySettings settings) =>
-        UserMemorySettingsStore.Save(DataRoot, settings);
+        _userMemorySettings.Save(settings);
 
     public AgentOrchestrationSettings LoadAgentOrchestrationSettings() =>
         AgentOrchestrationSettingsStore.LoadOrDefault(DataRoot);
@@ -231,10 +250,10 @@ public sealed class AliServices
         AgentOrchestrationSettingsStore.Save(DataRoot, settings);
 
     public WebSourceBackendSettings LoadWebSourceBackendSettings() =>
-        WebSourceBackendSettingsStore.LoadOrDefault(DataRoot);
+        _internetSettings.Capture().Settings;
 
     public void SaveWebSourceBackendSettings(WebSourceBackendSettings settings) =>
-        WebSourceBackendSettingsStore.Save(DataRoot, settings);
+        _internetSettings.Save(settings);
 
     public string GetGeminiGroundingUsageStatus(WebSourceBackendSettings settings) =>
         new GeminiGroundingUsageLedger(DataRoot).GetStatus(settings, DateTimeOffset.UtcNow);
@@ -361,11 +380,15 @@ public sealed class AliServices
             correctionStore);
 
         var fallbackRuntime = new DevelopmentLocalModelRuntime();
-        var configuredOptions = RuntimeSettingsStore.LoadOpenAiCompatibleOptions(dataRoot);
+        var runtimeSettings = new OpenAiCompatibleRuntimeOptionsSnapshotOwner(dataRoot);
+        var configuredOptions = runtimeSettings.Capture().Settings;
+        var runtimeProviderPresets = RuntimeProviderPresetCatalog.LoadDefault();
+        var internetSettings = new WebSourceBackendSettingsSnapshotOwner(dataRoot);
+        var userMemorySettings = new UserMemorySettingsSnapshotOwner(dataRoot);
         var runtimeHttpClient = LocalOnlyHttpClientFactory.Create("AliLocalDesktop/1.0");
         var remoteRuntimeHttpClient = RemoteRuntimeHttpClientFactory.Create("AliRemoteRuntime/1.0");
         var internetHttpClient = InternetHttpClientFactory.CreateClient();
-        var runtimeCredentials = new RuntimeCredentialStore(dataRoot);
+        var runtimeCredentials = new RuntimeCredentialSnapshotOwner(dataRoot);
         var runtimeCapabilityProfiles = new RuntimeCapabilityProfileStore(dataRoot);
         var qdrant = new QdrantServiceManager(dataRoot);
         var localVectorLibrarySettings = new LocalVectorLibrarySettingsSnapshotOwner(dataRoot);
@@ -388,13 +411,13 @@ public sealed class AliServices
             userDataRoot,
             qdrant,
             () => localVectorLibrarySettings.Capture().Settings,
-            () => UserMemorySettingsStore.LoadOrDefault(dataRoot),
-            () => RuntimeSettingsStore.LoadOpenAiCompatibleOptions(dataRoot),
+            () => userMemorySettings.Capture().Settings,
+            () => runtimeSettings.Capture().Settings,
             new ProbedParticipantMemoryEmbeddingIdentitySource(runtimeHttpClient),
             options => runtimeCredentials.ResolveApiKey(options.ApiKeyEnvironmentVariable));
         var userMemories = new Mem0UserMemoryService(
             mem0Client,
-            () => UserMemorySettingsStore.LoadOrDefault(dataRoot),
+            () => userMemorySettings.Capture().Settings,
             participantReceiptAuthority,
             participantRosterAuthority,
             participantIdentitySession,
@@ -429,7 +452,7 @@ public sealed class AliServices
             runtimeHttpClient,
             qdrant,
             localVectorLibrarySettings);
-        var candidateRuntime = configuredOptions is { Enabled: true }
+        var candidateRuntime = configuredOptions.Enabled
             ? new OpenAiCompatibleLocalModelRuntime(
                 LocalEndpointPolicy.IsRemote(configuredOptions.Endpoint)
                     ? remoteRuntimeHttpClient
@@ -443,10 +466,10 @@ public sealed class AliServices
         var runtime = new SafeActivatingLocalRuntime(fallbackRuntime, candidateRuntime);
         var webSources = new TavilyFirecrawlSourceRetriever(
             internetHttpClient,
-            () => WebSourceBackendSettingsStore.LoadOrDefault(dataRoot),
+            () => internetSettings.Capture().Settings,
             dataRoot: dataRoot);
         var webResearch = new McpWebResearchClient(
-            () => WebSourceBackendSettingsStore.LoadOrDefault(dataRoot));
+            () => internetSettings.Capture().Settings);
         var mcpClients = new McpClientManager(dataRoot);
         var mcpServerToolFactory = new AliMcpServerToolFactory(
             localLibrary,
@@ -456,7 +479,8 @@ public sealed class AliServices
             reminders,
             profile,
             codingModule,
-            fileAccess);
+            fileAccess,
+            () => internetSettings.Capture().Settings);
         var voiceSettings = VoiceRuntimeSettingsStore.LoadOrDefault(dataRoot);
         var voiceRecorder = new NAudioVoiceRecorder();
         var speechToText = new WhisperCliSpeechToTextProvider(CreateSpeechToTextOptions(dataRoot, voiceSettings));
@@ -484,7 +508,7 @@ public sealed class AliServices
                 codingModule,
                 userMemories,
                 activeUsers,
-                () => UserMemorySettingsStore.LoadOrDefault(dataRoot),
+                () => userMemorySettings.Capture().Settings,
                 workflowCheckpointPath,
                 () => AgentOrchestrationSettingsStore.LoadOrDefault(dataRoot),
                 semanticToolCatalog,
@@ -493,7 +517,8 @@ public sealed class AliServices
                 conversations,
                 userMemories,
                 participantRosterAuthority,
-                participantReceiptAuthority);
+                participantReceiptAuthority,
+                () => internetSettings.Capture().Settings);
             var capabilitySettings = coordinator.CapabilitySettings
                 ?? throw new InvalidOperationException(
                     "Production capability settings were not initialized.");
@@ -527,6 +552,11 @@ public sealed class AliServices
                 mcpServer,
                 qdrant,
                 localVectorLibrarySettings,
+                runtimeSettings,
+                internetSettings,
+                userMemorySettings,
+                runtimeCredentials,
+                runtimeProviderPresets,
                 activeUsers,
                 participantPresence,
                 userMemories,

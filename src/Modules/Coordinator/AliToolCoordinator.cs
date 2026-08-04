@@ -67,7 +67,8 @@ public sealed class AliToolCoordinator : IDisposable
         IConversationPublicationProbe? conversationPublicationProbe = null,
         IParticipantMemoryService? participantMemories = null,
         IParticipantRosterAuthority? participantRosterAuthority = null,
-        ParticipantMemoryReceiptAuthority? participantReceiptAuthority = null)
+        ParticipantMemoryReceiptAuthority? participantReceiptAuthority = null,
+        Func<WebSourceBackendSettings>? internetSettings = null)
         : this(
             runtime,
             chatClient,
@@ -94,7 +95,8 @@ public sealed class AliToolCoordinator : IDisposable
             conversationPublicationProbe,
             participantMemories,
             participantRosterAuthority,
-            participantReceiptAuthority)
+            participantReceiptAuthority,
+            internetSettings)
     {
     }
 
@@ -123,7 +125,8 @@ public sealed class AliToolCoordinator : IDisposable
         IConversationPublicationProbe? conversationPublicationProbe = null,
         IParticipantMemoryService? participantMemories = null,
         IParticipantRosterAuthority? participantRosterAuthority = null,
-        ParticipantMemoryReceiptAuthority? participantReceiptAuthority = null)
+        ParticipantMemoryReceiptAuthority? participantReceiptAuthority = null,
+        Func<WebSourceBackendSettings>? internetSettings = null)
     {
         _assistantName = assistantProfile.Normalize().AssistantName;
         _activeUsers = activeUsers;
@@ -155,7 +158,8 @@ public sealed class AliToolCoordinator : IDisposable
             shadowObserver,
             participantMemories,
             participantRosterAuthority,
-            participantReceiptAuthority);
+            participantReceiptAuthority,
+            internetSettings);
         var targetStateAdapters = fileAccess.TargetStateAdapters
             .Concat(workMemory.TargetStateAdapters)
             .Concat(codingModule.TargetStateAdapters)
@@ -466,6 +470,13 @@ public sealed class AliToolCoordinator : IDisposable
                     result.StructuredRecoveryRequired
                         ? "Choose one of the recovery buttons; Ali will not infer the answer from chat text."
                         : $"{_assistantName} preserved the work and is waiting for your next message.");
+            }
+            else if (!result.CompletedSuccessfully)
+            {
+                turn.Report(
+                    AgentActivityKind.Warning,
+                    "Request not completed",
+                    $"{_assistantName} returned the exact unresolved Workspace obstacle without claiming success.");
             }
             else
             {

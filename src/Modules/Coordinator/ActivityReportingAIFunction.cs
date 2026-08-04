@@ -3,6 +3,7 @@ using System.Text.Json;
 using Ali.Modules.Mcp;
 using Ali.Modules.Orchestration.Evidence;
 using Ali.Modules.Orchestration.Observation;
+using Ali.Modules.Orchestration.Planning;
 using Microsoft.Extensions.AI;
 
 namespace Ali.Modules.Coordinator;
@@ -66,6 +67,27 @@ internal sealed class ActivityReportingAIFunction(
                     turn,
                     AgentActivityKind.Warning,
                     $"{_activityDisplayName} returned an uncertain external result",
+                    failureSummary,
+                    Stopwatch.GetElapsedTime(started).TotalMilliseconds,
+                    executionReceipt: new AgentToolExecutionReceipt(
+                        Name,
+                        AgentToolExecutionOutcome.Failed,
+                        failureSummary,
+                        DateTimeOffset.UtcNow)
+                    {
+                        DisplayName = UserFacingDisplayName
+                    });
+                return result;
+            }
+
+            if (AliProductionToolOutcomeRegistry.ClassifyTypedReturn(Name, result)
+                == PlanningToolDomainOutcome.Failed)
+            {
+                var failureSummary = DescribeResult(result);
+                TryReport(
+                    turn,
+                    AgentActivityKind.Warning,
+                    $"{_activityDisplayName} returned a failed result",
                     failureSummary,
                     Stopwatch.GetElapsedTime(started).TotalMilliseconds,
                     executionReceipt: new AgentToolExecutionReceipt(

@@ -285,6 +285,7 @@ public sealed class MainWindowViewModel : ObservableObject
         CopyMessageCommand = CreateCommand(CopyMessage);
         FlagIncorrectCommand = CreateCommand(FlagIncorrect);
         SaveAssistantNameCommand = CreateCommand(_ => SaveAssistantName());
+        ApplyRuntimeProviderPresetCommand = CreateCommand(ApplyRuntimeProviderPreset);
         SaveRuntimeSettingsCommand = CreateCommand(_ => SaveRuntimeSettings());
         SaveInternetBackendSettingsCommand = CreateCommand(_ => SaveInternetBackendSettings());
         TestGeminiInternetBackendCommand = CreateAsyncCommand(() => TestInternetProviderAsync(InternetSearchProvider.GoogleGroundedSearch), () => !IsBusy);
@@ -671,6 +672,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ICommand SaveAssistantNameCommand { get; }
 
+    public ICommand ApplyRuntimeProviderPresetCommand { get; }
+
     public ICommand SaveRuntimeSettingsCommand { get; }
 
     public ICommand SaveInternetBackendSettingsCommand { get; }
@@ -1014,6 +1017,9 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public IReadOnlyList<string> RuntimeEngineChoices => LocalRuntimeEngines.Choices;
 
+    public IReadOnlyList<RuntimeProviderPreset> RuntimeLlmPresets =>
+        _services.RuntimeProviderPresets.LlmPresets;
+
     public string SelectedRuntimeEngine
     {
         get => _selectedRuntimeEngine;
@@ -1032,11 +1038,7 @@ public sealed class MainWindowViewModel : ObservableObject
     }
 
     public string RuntimeEngineGuidanceText =>
-        LocalRuntimeEngines.Normalize(
-            SelectedRuntimeEngine,
-            Uri.TryCreate(RuntimeEndpointText, UriKind.Absolute, out var endpoint)
-                ? endpoint
-                : LocalRuntimeEngines.DefaultEndpoint(SelectedRuntimeEngine)) switch
+        LocalRuntimeEngines.Normalize(SelectedRuntimeEngine) switch
         {
             LocalRuntimeEngines.LmStudio =>
                 "In LM Studio, start the Local Server on the Developer page. Then press Refresh models; Ali reads the server's OpenAI-compatible /v1/models list.",
@@ -4863,11 +4865,14 @@ public sealed class MainWindowViewModel : ObservableObject
             GeminiMaxRequestsPerDay = canEditGoogleBilling ? geminiDailyLimit : existing.GeminiMaxRequestsPerDay,
             GeminiMonthlySpendLimitUsd = canEditGoogleBilling ? geminiSpendLimit : existing.GeminiMonthlySpendLimitUsd,
             TavilyBaseUrl = existing.TavilyBaseUrl,
+            TavilyMcpEndpointTemplate = existing.TavilyMcpEndpointTemplate,
             TavilyApiKeyEnvironmentVariable = existing.TavilyApiKeyEnvironmentVariable,
             TavilyApiKey = NullIfWhiteSpace(InternetTavilyApiKeyText),
             TavilySearchDepth = existing.TavilySearchDepth,
             TavilyCurrentNewsTimeRange = existing.TavilyCurrentNewsTimeRange,
             FirecrawlBaseUrl = existing.FirecrawlBaseUrl,
+            FirecrawlMcpEndpointTemplate = existing.FirecrawlMcpEndpointTemplate,
+            FirecrawlAuthenticationMode = existing.FirecrawlAuthenticationMode,
             FirecrawlApiKeyEnvironmentVariable = existing.FirecrawlApiKeyEnvironmentVariable,
             FirecrawlApiKey = NullIfWhiteSpace(InternetFirecrawlApiKeyText),
             BraveSearchBaseUrl = existing.BraveSearchBaseUrl,
@@ -4879,6 +4884,9 @@ public sealed class MainWindowViewModel : ObservableObject
             SerperFreeQueryAllowance = existing.SerperFreeQueryAllowance,
             UseFirecrawlForPageExtraction = existing.UseFirecrawlForPageExtraction,
             UseFirecrawlSearchScrapeOptions = existing.UseFirecrawlSearchScrapeOptions,
+            UseMcpResearch = existing.UseMcpResearch,
+            McpResearchTimeoutSeconds = existing.McpResearchTimeoutSeconds,
+            GoogleMapsDirectionsBaseUrl = existing.GoogleMapsDirectionsBaseUrl,
             MaxSearchResults = existing.MaxSearchResults,
             MaxExtractedPages = existing.MaxExtractedPages,
             MaxExcerptCharacters = existing.MaxExcerptCharacters,
@@ -5537,6 +5545,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private OpenAiCompatibleRuntimeOptions BuildRuntimeOptionsFromUi()
     {
+        var existing = _services.LoadRuntimeSettings();
         if (!Uri.TryCreate(RuntimeEndpointText.Trim(), UriKind.Absolute, out var endpoint))
         {
             throw new InvalidOperationException("Runtime endpoint must be an absolute URL.");
@@ -5544,7 +5553,7 @@ public sealed class MainWindowViewModel : ObservableObject
 
         var endpointPolicy = LocalEndpointPolicy.Validate(
             endpoint,
-            allowPrivateLan: false,
+            allowPrivateLan: existing.AllowPrivateLanEndpoint,
             allowRemoteHttps: RuntimeAllowRemoteHttps);
         if (!endpointPolicy.IsAllowed)
         {
@@ -5614,17 +5623,17 @@ public sealed class MainWindowViewModel : ObservableObject
             StreamingEnabled: RuntimeStreamingEnabled,
             SupportsVision: RuntimeVisionEnabled,
             SupportsToolCalls: RuntimeToolCallsEnabled,
-            AllowPrivateLanEndpoint: false)
+            AllowPrivateLanEndpoint: existing.AllowPrivateLanEndpoint)
         {
             Engine = engine,
             ReasoningEffort = _selectedReasoningEffort,
             ThinkingEnabled = RuntimeThinkingEnabled,
             ThinkingControl = RuntimeThinkingControl,
             AllowRemoteHttpsEndpoint = RuntimeAllowRemoteHttps,
-            ApiKeyEnvironmentVariable = RuntimeCredentialStore.DefaultApiKeyEnvironmentVariable,
-            TokenizerIdentity = selectedModel?.TokenizerIdentity ?? "provider-reported-or-unknown",
-            RollingWindowMode = selectedModel?.RollingWindowMode ?? "provider-managed",
-            CapabilityProbeEnabled = true
+            ApiKeyEnvironmentVariable = existing.ApiKeyEnvironmentVariable,
+            TokenizerIdentity = selectedModel?.TokenizerIdentity ?? existing.TokenizerIdentity,
+            RollingWindowMode = selectedModel?.RollingWindowMode ?? existing.RollingWindowMode,
+            CapabilityProbeEnabled = existing.CapabilityProbeEnabled
         });
     }
 
@@ -7087,13 +7096,28 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private void ApplyRuntimeEngineSelection(string engine)
     {
-        var normalized = LocalRuntimeEngines.Normalize(engine, LocalRuntimeEngines.DefaultEndpoint(engine));
-        RuntimeEndpointText = LocalRuntimeEngines.DefaultEndpoint(normalized).ToString();
+        var normalized = LocalRuntimeEngines.Normalize(engine);
         CanActivateRuntime = false;
         RuntimeSelectionStatusText = normalized == LocalRuntimeEngines.LmStudio
-            ? "LM Studio selected. Start its Local Server, press Refresh models, choose an installed model, then Check and Activate."
-            : $"{normalized} selected. Refresh its installed model list, then Check and Activate.";
-        StatusText = $"Runtime engine selected: {normalized}. The current engine remains active until the replacement passes Check.";
+            ? "LM Studio selected. Apply its preset only if you want to replace the editable endpoint."
+            : $"{normalized} selected. Apply a preset only if you want to replace the editable endpoint.";
+        StatusText = $"Runtime engine selected: {normalized}. The endpoint was preserved.";
+    }
+
+    private void ApplyRuntimeProviderPreset(object? parameter)
+    {
+        if (parameter is not RuntimeProviderPreset preset)
+        {
+            throw new InvalidOperationException("Select an LLM endpoint preset.");
+        }
+
+        SelectedRuntimeEngine = preset.DisplayName;
+        RuntimeEndpointText = preset.Endpoint;
+        CanActivateRuntime = false;
+        RuntimeSelectionStatusText = string.IsNullOrWhiteSpace(preset.Endpoint)
+            ? $"{preset.DisplayName} selected. Enter the custom endpoint, then Refresh models."
+            : $"{preset.DisplayName} preset applied. You can still edit the endpoint before saving.";
+        StatusText = RuntimeSelectionStatusText;
     }
 
     private RuntimeModelChoice? CurrentRuntimeModelChoice()

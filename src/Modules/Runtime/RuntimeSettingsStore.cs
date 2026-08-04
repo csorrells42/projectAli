@@ -15,10 +15,12 @@ public static class RuntimeSettingsStore
     public static string GetExamplePath(string dataDirectory) =>
         Path.Combine(dataDirectory, "runtime-settings.example.json");
 
-    public static OpenAiCompatibleRuntimeOptions GetDefaultOptions() =>
-        new(
+    public static OpenAiCompatibleRuntimeOptions GetDefaultOptions()
+    {
+        var preset = RuntimeProviderPresetCatalog.LoadDefault().RequireLlm("lm-studio");
+        return new(
             Enabled: false,
-            Endpoint: LocalRuntimeEngines.DefaultEndpoint(LocalRuntimeEngines.LmStudio),
+            Endpoint: RequirePresetEndpoint(preset),
             Model: string.Empty,
             DisplayName: "LM Studio local model",
             Family: "local",
@@ -36,9 +38,24 @@ public static class RuntimeSettingsStore
             Engine = LocalRuntimeEngines.LmStudio,
             CapabilityProbeEnabled = true
         };
+    }
 
-    public static OpenAiCompatibleRuntimeOptions LoadOrDefault(string dataDirectory) =>
-        LoadOpenAiCompatibleOptions(dataDirectory) ?? GetDefaultOptions();
+    public static OpenAiCompatibleRuntimeOptions LoadOrDefault(string dataDirectory)
+    {
+        var loaded = LoadOpenAiCompatibleOptions(dataDirectory);
+        if (loaded is not null)
+        {
+            return loaded;
+        }
+
+        if (File.Exists(GetSettingsPath(dataDirectory)))
+        {
+            throw new InvalidDataException(
+                "The existing runtime settings could not be loaded and were not replaced.");
+        }
+
+        return GetDefaultOptions();
+    }
 
     public static OpenAiCompatibleRuntimeOptions? LoadOpenAiCompatibleOptions(string dataDirectory)
     {
@@ -146,7 +163,8 @@ public static class RuntimeSettingsStore
         }
 
         BackupInvalidFile(dataDirectory, filePath);
-        Save(dataDirectory, GetDefaultOptions());
+        throw new InvalidDataException(
+            $"The existing runtime settings file '{filePath}' is invalid. A backup was created, but the selected settings were not replaced.");
     }
     public static void WriteDefaultIfMissing(string dataDirectory)
     {
@@ -181,9 +199,10 @@ public static class RuntimeSettingsStore
             return;
         }
 
+        var preset = RuntimeProviderPresetCatalog.LoadDefault().RequireLlm("lm-studio");
         var options = new OpenAiCompatibleRuntimeOptions(
             Enabled: false,
-            Endpoint: LocalRuntimeEngines.DefaultEndpoint(LocalRuntimeEngines.LmStudio),
+            Endpoint: RequirePresetEndpoint(preset),
             Model: string.Empty,
             DisplayName: "LM Studio local model",
             Family: "local",
@@ -204,6 +223,12 @@ public static class RuntimeSettingsStore
 
         File.WriteAllText(filePath, JsonSerializer.Serialize(options, JsonOptions));
     }
+
+    private static Uri RequirePresetEndpoint(RuntimeProviderPreset preset) =>
+        Uri.TryCreate(preset.Endpoint, UriKind.Absolute, out var endpoint)
+            ? endpoint
+            : throw new InvalidDataException(
+                $"The external runtime preset '{preset.Id}' requires an absolute endpoint.");
 
     private static int ReadIntEnvironment(string name, int defaultValue) =>
         int.TryParse(Environment.GetEnvironmentVariable(name), out var value) ? value : defaultValue;

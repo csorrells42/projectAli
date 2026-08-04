@@ -177,12 +177,15 @@ internal sealed class AliMcpServerToolFactory
         IReminderStore reminders,
         AssistantProfile assistantProfile,
         AliCodingModule? codingModule = null,
-        AliWorkstationFileAccess? fileAccess = null)
+        AliWorkstationFileAccess? fileAccess = null,
+        Func<WebSourceBackendSettings>? internetSettings = null)
     {
         _activeUserTools = new AliActiveUserTools(null, static () => null);
         _memoryTools = new AliMemoryTools(memories, static () => null);
         _sourceTools = new AliSourceTools(localLibrary, webSources, webResearch, static () => null);
-        _navigationTools = new AliNavigationTools(static () => null);
+        _navigationTools = new AliNavigationTools(
+            static () => null,
+            internetSettings ?? (static () => new WebSourceBackendSettings()));
         _reminderTools = new AliReminderTools(reminders, static () => null);
         _identityTimeTools = new AliIdentityTimeTools(assistantProfile);
         _codingModule = codingModule;
@@ -203,12 +206,15 @@ internal sealed class AliMcpServerToolFactory
         IActiveUserSession activeUsers,
         Func<UserMemorySettings> memorySettings,
         AliCodingModule? codingModule = null,
-        AliWorkstationFileAccess? fileAccess = null)
+        AliWorkstationFileAccess? fileAccess = null,
+        Func<WebSourceBackendSettings>? internetSettings = null)
     {
         _activeUserTools = new AliActiveUserTools(activeUsers, static () => null);
         _memoryTools = new AliMemoryTools(userMemories, activeUsers, memorySettings, static () => null);
         _sourceTools = new AliSourceTools(localLibrary, webSources, webResearch, static () => null);
-        _navigationTools = new AliNavigationTools(static () => null);
+        _navigationTools = new AliNavigationTools(
+            static () => null,
+            internetSettings ?? (static () => new WebSourceBackendSettings()));
         _reminderTools = new AliReminderTools(reminders, static () => null);
         _identityTimeTools = new AliIdentityTimeTools(assistantProfile);
         _codingModule = codingModule;

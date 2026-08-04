@@ -1,4 +1,6 @@
 using System.Collections.Frozen;
+using System.Diagnostics.CodeAnalysis;
+using System.Text.Json;
 using Ali.Modules.Coding;
 using Ali.Modules.Coding.Architecture;
 using Ali.Modules.Coding.Debugging;
@@ -67,6 +69,8 @@ internal sealed class AliProductionToolOutcomeRegistry
 {
     private static readonly IReadOnlyDictionary<string, AliToolOutcomeContract> Contracts =
         CreateContracts();
+    private static readonly JsonSerializerOptions TypedReturnJsonOptions =
+        new(JsonSerializerDefaults.Web);
 
     private readonly AliFrameworkToolOutcomeSidecar _frameworkOutcomes;
 
@@ -97,6 +101,42 @@ internal sealed class AliProductionToolOutcomeRegistry
 
     internal static AliToolOutcomeContractKind? GetContractKind(string toolName) =>
         Contracts.TryGetValue(toolName, out var contract) ? contract.Kind : null;
+
+    internal static PlanningToolDomainOutcome ClassifyTypedReturn(
+        string toolName,
+        object? result) =>
+        !string.IsNullOrWhiteSpace(toolName)
+        && Contracts.TryGetValue(toolName, out var contract)
+            ? contract.ClassifyTypedReturn(result)
+            : PlanningToolDomainOutcome.Unreported;
+
+    internal static bool TryReadTypedReturn<TResult>(
+        object? result,
+        [NotNullWhen(true)] out TResult? typed)
+    {
+        if (result is TResult exact)
+        {
+            typed = exact;
+            return true;
+        }
+
+        if (result is JsonElement element)
+        {
+            try
+            {
+                typed = element.Deserialize<TResult>(TypedReturnJsonOptions);
+                return typed is not null;
+            }
+            catch (Exception ex) when (ex is JsonException or NotSupportedException)
+            {
+                // Only the exact closed contract schema is accepted. A malformed or
+                // incompatible framework payload remains unreported.
+            }
+        }
+
+        typed = default;
+        return false;
+    }
 
     internal PlanningToolDomainOutcome Classify(AliCompletedToolOutcomeRequest request)
     {
@@ -350,6 +390,7 @@ internal sealed class AliProductionToolOutcomeRegistry
             AliFrameworkToolOutcomeKey,
             AliFrameworkToolOutcomeSidecar,
             PlanningToolDomainOutcome> _classify;
+        private readonly Func<object?, PlanningToolDomainOutcome>? _classifyTypedReturn;
 
         private AliToolOutcomeContract(
             string toolName,
@@ -358,12 +399,14 @@ internal sealed class AliProductionToolOutcomeRegistry
                 AliCompletedToolOutcomeRequest,
                 AliFrameworkToolOutcomeKey,
                 AliFrameworkToolOutcomeSidecar,
-                PlanningToolDomainOutcome> classify)
+                PlanningToolDomainOutcome> classify,
+            Func<object?, PlanningToolDomainOutcome>? classifyTypedReturn = null)
         {
             ToolName = toolName;
             Kind = kind;
             Id = $"ali-outcome.{toolName}.v1";
             _classify = classify;
+            _classifyTypedReturn = classifyTypedReturn;
         }
 
         public string ToolName { get; }
@@ -378,6 +421,12 @@ internal sealed class AliProductionToolOutcomeRegistry
             AliFrameworkToolOutcomeSidecar sidecar) =>
             _classify(request, key, sidecar);
 
+        public PlanningToolDomainOutcome ClassifyTypedReturn(object? result) =>
+            Kind == AliToolOutcomeContractKind.TypedReturn
+                ? _classifyTypedReturn?.Invoke(result)
+                    ?? PlanningToolDomainOutcome.Unreported
+                : PlanningToolDomainOutcome.Unreported;
+
         public static AliToolOutcomeContract Typed<TResult>(
             string toolName,
             Func<TResult, PlanningToolDomainOutcome> classify) where TResult : notnull =>
@@ -390,7 +439,10 @@ internal sealed class AliProductionToolOutcomeRegistry
                     return request.Result is TResult typed
                         ? classify(typed)
                         : PlanningToolDomainOutcome.Unreported;
-                });
+                },
+                result => TryReadTypedReturn<TResult>(result, out var typed)
+                    ? classify(typed!)
+                    : PlanningToolDomainOutcome.Unreported);
 
         public static AliToolOutcomeContract ProviderBoundary(
             string toolName,

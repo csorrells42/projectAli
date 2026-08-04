@@ -753,7 +753,9 @@ internal sealed class AliRoslynCodingTools
 
     private static string NormalizeConfiguration(string? configuration) =>
         string.IsNullOrWhiteSpace(configuration)
-            ? "Debug"
+            ? AliCoreAssistantExecutionContext.IsActive
+                ? "Release"
+                : "Debug"
             : configuration.Trim() switch
             {
                 var value when value.Equals("Debug", StringComparison.OrdinalIgnoreCase) => "Debug",

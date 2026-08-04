@@ -1,8 +1,15 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Security.Cryptography;
 using System.Text;
 
 namespace Ali.Modules.Internet;
+
+internal static class WebProviderAuthenticationModes
+{
+    public const string ApiKey = "api-key";
+    public const string None = "none";
+}
 
 public sealed class WebSourceBackendSettings
 {
@@ -23,10 +30,9 @@ public sealed class WebSourceBackendSettings
 
     public string? GeminiApiKey { get; set; }
 
-    public string GeminiBaseUrl { get; set; } =
-        "https://generativelanguage.googleapis.com/v1beta/models/";
+    public string GeminiBaseUrl { get; set; } = string.Empty;
 
-    public string GeminiGroundedSearchModel { get; set; } = "gemini-3.5-flash-lite";
+    public string GeminiGroundedSearchModel { get; set; } = string.Empty;
 
     public int GeminiMaxOutputTokens { get; set; } = 1024;
 
@@ -36,7 +42,9 @@ public sealed class WebSourceBackendSettings
 
     public decimal GeminiMonthlySpendLimitUsd { get; set; } = 5m;
 
-    public string TavilyBaseUrl { get; set; } = "https://api.tavily.com";
+    public string TavilyBaseUrl { get; set; } = string.Empty;
+
+    public string TavilyMcpEndpointTemplate { get; set; } = string.Empty;
 
     public string TavilyApiKeyEnvironmentVariable { get; set; } = "TAVILY_API_KEY";
 
@@ -46,19 +54,23 @@ public sealed class WebSourceBackendSettings
 
     public string TavilyCurrentNewsTimeRange { get; set; } = "day";
 
-    public string FirecrawlBaseUrl { get; set; } = "https://api.firecrawl.dev/v2";
+    public string FirecrawlBaseUrl { get; set; } = string.Empty;
+
+    public string FirecrawlMcpEndpointTemplate { get; set; } = string.Empty;
+
+    public string FirecrawlAuthenticationMode { get; set; } = string.Empty;
 
     public string FirecrawlApiKeyEnvironmentVariable { get; set; } = "FIRECRAWL_API_KEY";
 
     public string? FirecrawlApiKey { get; set; }
 
-    public string BraveSearchBaseUrl { get; set; } = "https://api.search.brave.com/res/v1/web/search";
+    public string BraveSearchBaseUrl { get; set; } = string.Empty;
 
     public string BraveSearchApiKeyEnvironmentVariable { get; set; } = "BRAVE_SEARCH_API_KEY";
 
     public string? BraveSearchApiKey { get; set; }
 
-    public string SerperBaseUrl { get; set; } = "https://google.serper.dev";
+    public string SerperBaseUrl { get; set; } = string.Empty;
 
     public string SerperApiKeyEnvironmentVariable { get; set; } = "SERPER_API_KEY";
 
@@ -72,7 +84,9 @@ public sealed class WebSourceBackendSettings
 
     public bool UseMcpResearch { get; set; } = true;
 
-    public int McpResearchTimeoutSeconds { get; set; } = 120;
+    public int McpResearchTimeoutSeconds { get; set; }
+
+    public string GoogleMapsDirectionsBaseUrl { get; set; } = string.Empty;
 
     public int MaxSearchResults { get; set; } = 5;
 
@@ -80,7 +94,7 @@ public sealed class WebSourceBackendSettings
 
     public int MaxExcerptCharacters { get; set; } = 2400;
 
-    public int RequestTimeoutSeconds { get; set; } = 25;
+    public int RequestTimeoutSeconds { get; set; }
 
     public string? ResolveTavilyApiKey() =>
         ResolveApiKey(TavilyApiKey, TavilyApiKeyEnvironmentVariable);
@@ -112,6 +126,8 @@ public sealed class WebSourceBackendSettings
 
 public static class WebSourceBackendSettingsStore
 {
+    public const string SeedConfigurationFileName = "internet-provider-defaults.json";
+
     private const string ProtectedPrefix = "dpapi:v1:";
     private static readonly byte[] DpapiEntropy = Encoding.UTF8.GetBytes("Ali.GoogleGrounding.ApiKey.v1");
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
@@ -125,22 +141,25 @@ public static class WebSourceBackendSettingsStore
     public static string GetExamplePath(string dataRoot) =>
         Path.Combine(dataRoot, "Sources", "internet_backends.example.json");
 
+    public static string GetSeedConfigurationPath() =>
+        Path.Combine(AppContext.BaseDirectory, "Configuration", SeedConfigurationFileName);
+
     public static WebSourceBackendSettings LoadOrDefault(string dataRoot)
     {
         var path = GetSettingsPath(dataRoot);
         if (!File.Exists(path))
         {
-            return new WebSourceBackendSettings();
+            return LoadSeedConfiguration();
         }
 
         try
         {
             WebSourceBackendSettings settings;
-            using (var stream = File.OpenRead(path))
-            {
-                settings = JsonSerializer.Deserialize<WebSourceBackendSettings>(stream, JsonOptions)
-                           ?? new WebSourceBackendSettings();
-            }
+            var json = File.ReadAllText(path);
+            var effectiveJson = MergeExternalDefaultsForMissingProperties(json);
+            settings = JsonSerializer.Deserialize<WebSourceBackendSettings>(effectiveJson, JsonOptions)
+                       ?? throw new InvalidDataException(
+                           $"The existing Internet backend settings file '{path}' is empty and was not replaced.");
 
             var storedKey = settings.GeminiApiKey;
             settings.GeminiApiKey = UnprotectSecret(storedKey);
@@ -155,7 +174,9 @@ public static class WebSourceBackendSettingsStore
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
-            return new WebSourceBackendSettings();
+            throw new InvalidDataException(
+                $"The existing Internet backend settings file '{path}' could not be loaded and was not replaced.",
+                ex);
         }
     }
 
@@ -188,7 +209,7 @@ public static class WebSourceBackendSettingsStore
             return;
         }
 
-        Save(dataRoot, new WebSourceBackendSettings());
+        Save(dataRoot, LoadSeedConfiguration());
     }
 
     public static void WriteExample(string dataRoot)
@@ -200,8 +221,54 @@ public static class WebSourceBackendSettingsStore
             return;
         }
 
-        using var stream = File.Create(path);
-        JsonSerializer.Serialize(stream, new WebSourceBackendSettings(), JsonOptions);
+        File.Copy(GetRequiredSeedConfigurationPath(), path);
+    }
+
+    private static WebSourceBackendSettings LoadSeedConfiguration()
+    {
+        var path = GetRequiredSeedConfigurationPath();
+        try
+        {
+            using var stream = File.OpenRead(path);
+            return JsonSerializer.Deserialize<WebSourceBackendSettings>(stream, JsonOptions)
+                   ?? throw new InvalidDataException(
+                       $"The external Internet provider seed '{path}' is empty.");
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidDataException(
+                $"The external Internet provider seed '{path}' is not valid JSON.",
+                ex);
+        }
+    }
+
+    private static string MergeExternalDefaultsForMissingProperties(string sourceJson)
+    {
+        var source = JsonNode.Parse(sourceJson) as JsonObject
+            ?? throw new InvalidDataException(
+                "The existing Internet backend settings must be a JSON object.");
+        var seed = JsonNode.Parse(File.ReadAllText(GetRequiredSeedConfigurationPath())) as JsonObject
+            ?? throw new InvalidDataException(
+                "The external Internet provider seed must be a JSON object.");
+        foreach (var property in seed)
+        {
+            if (!source.ContainsKey(property.Key))
+            {
+                source[property.Key] = property.Value?.DeepClone();
+            }
+        }
+
+        return source.ToJsonString(JsonOptions);
+    }
+
+    private static string GetRequiredSeedConfigurationPath()
+    {
+        var path = GetSeedConfigurationPath();
+        return File.Exists(path)
+            ? path
+            : throw new FileNotFoundException(
+                "The external Internet provider seed configuration was not found.",
+                path);
     }
 
     internal static string? ProtectSecret(string? value)

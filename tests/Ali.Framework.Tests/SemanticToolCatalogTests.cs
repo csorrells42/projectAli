@@ -24,8 +24,10 @@ public sealed class SemanticToolCatalogTests
             out var recoverySuiteLoaded);
 
         Assert.False(recoverySuiteLoaded);
-        Assert.Single(selectedNames);
+        Assert.Equal(8, selectedNames.Count);
         Assert.Contains(AliCapabilityCatalog.RoslynAnalyzeProjectName, selectedNames);
+        Assert.Contains(AliCapabilityCatalog.DotNetRunName, selectedNames);
+        Assert.Contains(AliCapabilityCatalog.DotNetStopProjectName, selectedNames);
     }
 
     [Fact]
@@ -61,10 +63,11 @@ public sealed class SemanticToolCatalogTests
             out var recoverySuiteLoaded);
 
         Assert.True(recoverySuiteLoaded);
-        Assert.Equal(7, selectedNames.Count);
+        Assert.Equal(9, selectedNames.Count);
         Assert.Contains(AliCapabilityCatalog.SearchCurrentWebName, selectedNames);
         Assert.Contains(AliCapabilityCatalog.DotNetCreateProjectName, selectedNames);
-        Assert.DoesNotContain(AliCapabilityCatalog.DotNetRunName, selectedNames);
+        Assert.Contains(AliCapabilityCatalog.DotNetRunName, selectedNames);
+        Assert.Contains(AliCapabilityCatalog.DotNetStopProjectName, selectedNames);
     }
 
     [Fact]
@@ -87,7 +90,9 @@ public sealed class SemanticToolCatalogTests
         Assert.Contains(AliCapabilityCatalog.DotNetCreateProjectName, selectedNames);
         Assert.Contains(AliCapabilityCatalog.DotNetBuildName, selectedNames);
         Assert.Contains(AliCapabilityCatalog.DotNetTestName, selectedNames);
-        Assert.Equal(7, selectedNames.Count);
+        Assert.Contains(AliCapabilityCatalog.DotNetRunName, selectedNames);
+        Assert.Contains(AliCapabilityCatalog.DotNetStopProjectName, selectedNames);
+        Assert.Equal(9, selectedNames.Count);
     }
 
     [Fact]

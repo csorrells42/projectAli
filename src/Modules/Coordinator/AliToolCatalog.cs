@@ -46,7 +46,8 @@ internal sealed class AliToolCatalog
         IShadowToolObserver? shadowObserver = null,
         IParticipantMemoryService? participantMemories = null,
         IParticipantRosterAuthority? participantRosterAuthority = null,
-        ParticipantMemoryReceiptAuthority? participantReceiptAuthority = null)
+        ParticipantMemoryReceiptAuthority? participantReceiptAuthority = null,
+        Func<WebSourceBackendSettings>? internetSettings = null)
     {
         var profile = assistantProfile.Normalize();
         ParticipantMemoryTools = participantMemories is not null
@@ -98,7 +99,9 @@ internal sealed class AliToolCatalog
                 : ParticipantMemoryTools.ReconcileAsync;
         var activeUserTools = new AliActiveUserTools(activeUsers, turnAccessor);
         var sourceTools = new AliSourceTools(localLibrary, webSources, webResearch, turnAccessor);
-        var navigationTools = new AliNavigationTools(turnAccessor);
+        var navigationTools = new AliNavigationTools(
+            turnAccessor,
+            internetSettings ?? (static () => new WebSourceBackendSettings()));
         var reminderTools = new AliReminderTools(reminders, turnAccessor);
         var identityTimeTools = new AliIdentityTimeTools(profile);
         var permissionPolicy = new AliToolPermissionPolicy(

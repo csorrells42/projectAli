@@ -40,6 +40,7 @@
   <ItemGroup>
     <None Remove="Modules\Voice\Tools\local_kitten_tts.py" />
     <None Remove="Modules\Voice\Tools\local_whisper_stt.py" />
+    <None Update="Configuration\*.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Update="Modules\Coding\Python\Tools\ali_python_analyzer.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Update="Modules\Coding\Agents\Tools\ali_openhands_launcher.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <None Update="Modules\Coding\Agents\Tools\ali_aider_launcher.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
