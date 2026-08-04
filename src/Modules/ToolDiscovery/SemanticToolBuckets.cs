@@ -109,23 +109,41 @@ internal static class SemanticToolBuckets
             [AliCapabilityCatalog.SemanticDiscoverToolsName, AliCapabilityCatalog.ListAvailableToolsName],
             AlwaysVisible: true),
         new(
-            "personal-and-current",
-            "Personal context, current information and everyday assistance",
-            "Selected-user identity, durable memory, current web evidence, navigation, local documents, calendar events, assistant identity and authoritative local time.",
+            "participant-memory",
+            "Participant identity and durable memory recall",
+            "Inspect the selected participant profile, recall relevant durable memory, and list that participant's current memories.",
             [
                 AliCapabilityCatalog.GetActiveUserProfileName,
                 AliCapabilityCatalog.RecallUserMemoryName,
+                AliCapabilityCatalog.ListCurrentUserMemoriesName
+            ]),
+        new(
+            "participant-memory-change",
+            "Participant memory proposals and changes",
+            "Propose, consent to, and reconcile durable participant-memory mutations through the participant-aware memory boundary.",
+            [
                 AliCapabilityCatalog.MutateParticipantMemoryName,
                 AliCapabilityCatalog.ConsentParticipantMemoryProposalName,
-                AliCapabilityCatalog.ReconcileParticipantMemoryMutationName,
-                AliCapabilityCatalog.ListCurrentUserMemoriesName,
+                AliCapabilityCatalog.ReconcileParticipantMemoryMutationName
+            ]),
+        new(
+            "current-information",
+            "Current web, local knowledge and authoritative time",
+            "Search current web evidence for weather, news, prices, scores, schedules and other changing facts; perform deeper web research, search the local document library, and read authoritative local time.",
+            [
                 AliCapabilityCatalog.SearchCurrentWebName,
-                AliCapabilityCatalog.CreateGoogleMapsDirectionsLinkName,
                 AliCapabilityCatalog.ResearchWebName,
                 AliCapabilityCatalog.SearchLocalLibraryName,
-                AliCapabilityCatalog.CreateCalendarEventName,
-                AliCapabilityCatalog.GetAssistantIdentityName,
                 AliCapabilityCatalog.GetCurrentLocalTimeName
+            ]),
+        new(
+            "everyday-assistance",
+            "Directions, calendar and assistant identity",
+            "Create a Google Maps directions link, create a calendar event, or inspect Ali's assistant identity.",
+            [
+                AliCapabilityCatalog.CreateGoogleMapsDirectionsLinkName,
+                AliCapabilityCatalog.CreateCalendarEventName,
+                AliCapabilityCatalog.GetAssistantIdentityName
             ]),
         new(
             "files",

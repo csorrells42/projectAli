@@ -429,7 +429,17 @@ public sealed class AliProductionCapabilityCatalogTests
         {
             if (byName.TryGetValue(policy.Name, out var descriptor))
             {
-                Assert.True(descriptor.Effect.IsMutation, policy.Name);
+                if (policy.Name is AliCapabilityCatalog.SearchCurrentWebName
+                    or AliCapabilityCatalog.SearchLocalLibraryName)
+                {
+                    // Provider caches and indexes are infrastructure bookkeeping. They do
+                    // not turn an idempotent target-domain read into a user-data mutation.
+                    Assert.False(descriptor.Effect.IsMutation, policy.Name);
+                }
+                else
+                {
+                    Assert.True(descriptor.Effect.IsMutation, policy.Name);
+                }
             }
         }
 
@@ -455,16 +465,15 @@ public sealed class AliProductionCapabilityCatalogTests
         Assert.NotNull(debuggerEvaluation.Effect.ReconcilerId);
 
         var localLibrarySearch = byName[AliCapabilityCatalog.SearchLocalLibraryName];
-        Assert.Equal(CapabilityEffectKind.ProcessControl, localLibrarySearch.Effect.Kind);
-        Assert.Equal(
-            CapabilityMutationBoundary.PermissionGuarded,
-            localLibrarySearch.Effect.MutationBoundary);
+        Assert.Equal(CapabilityEffectKind.ExternalRead, localLibrarySearch.Effect.Kind);
+        Assert.Equal(CapabilityMutationBoundary.None, localLibrarySearch.Effect.MutationBoundary);
         Assert.True(localLibrarySearch.Effect.ReadsLocalData);
-        Assert.True(localLibrarySearch.Effect.WritesLocalData);
+        Assert.False(localLibrarySearch.Effect.WritesLocalData);
         Assert.True(localLibrarySearch.Effect.UsesNetwork);
-        Assert.True(localLibrarySearch.Effect.StartsProcesses);
+        Assert.False(localLibrarySearch.Effect.StartsProcesses);
+        Assert.True(localLibrarySearch.Effect.SupportsIdempotency);
         Assert.False(localLibrarySearch.Permission.RequiresApproval);
-        Assert.NotNull(localLibrarySearch.Effect.ReconcilerId);
+        Assert.Null(localLibrarySearch.Effect.ReconcilerId);
 
         var calendarEvent = byName[AliCapabilityCatalog.CreateCalendarEventName];
         Assert.Equal(CapabilityEffectKind.LocalMutation, calendarEvent.Effect.Kind);
@@ -495,26 +504,28 @@ public sealed class AliProductionCapabilityCatalogTests
     }
 
     [Fact]
-    public void ProviderBackedWebReads_DoNotClaimReplayIdempotency()
+    public void ProviderBackedWebReads_AreCallableIdempotentTargetDomainReads()
     {
         var byName = CreateDescriptorsByName();
 
         var currentWebSearch = byName[AliCapabilityCatalog.SearchCurrentWebName];
-        Assert.Equal(CapabilityEffectKind.LocalMutation, currentWebSearch.Effect.Kind);
-        Assert.Equal(CapabilityMutationBoundary.PermissionGuarded, currentWebSearch.Effect.MutationBoundary);
-        Assert.True(currentWebSearch.Effect.WritesLocalData);
+        Assert.Equal(CapabilityEffectKind.ExternalRead, currentWebSearch.Effect.Kind);
+        Assert.Equal(CapabilityMutationBoundary.None, currentWebSearch.Effect.MutationBoundary);
+        Assert.False(currentWebSearch.Effect.WritesLocalData);
         Assert.True(currentWebSearch.Effect.UsesNetwork);
-        Assert.False(currentWebSearch.Effect.SupportsIdempotency);
+        Assert.True(currentWebSearch.Effect.SupportsIdempotency);
         Assert.False(currentWebSearch.Permission.RequiresApproval);
-        Assert.False(string.IsNullOrWhiteSpace(currentWebSearch.Effect.ReconcilerId));
+        Assert.Null(currentWebSearch.Effect.ReconcilerId);
 
         var research = byName[AliCapabilityCatalog.ResearchWebName];
-        Assert.Equal(CapabilityEffectKind.ExternalMutation, research.Effect.Kind);
-        Assert.Equal(CapabilityMutationBoundary.PermissionGuarded, research.Effect.MutationBoundary);
+        Assert.Equal(CapabilityEffectKind.ExternalRead, research.Effect.Kind);
+        Assert.Equal(CapabilityMutationBoundary.None, research.Effect.MutationBoundary);
         Assert.True(research.Effect.ReadsLocalData);
+        Assert.False(research.Effect.WritesLocalData);
         Assert.True(research.Effect.UsesNetwork);
-        Assert.False(research.Effect.SupportsIdempotency);
-        Assert.False(string.IsNullOrWhiteSpace(research.Effect.ReconcilerId));
+        Assert.True(research.Effect.SupportsIdempotency);
+        Assert.False(research.Effect.StartsProcesses);
+        Assert.Null(research.Effect.ReconcilerId);
 
         var benignFileRead = byName[AliCapabilityCatalog.FileReadName];
         Assert.Equal(CapabilityEffectKind.Read, benignFileRead.Effect.Kind);
@@ -620,7 +631,7 @@ public sealed class AliProductionCapabilityCatalogTests
     }
 
     [Fact]
-    public void LazyMemoryTools_FailClosedBeforeStartingTheirBackingServices()
+    public void ParticipantMemoryReads_StayCallableWhileMutationsRemainDurable()
     {
         var byName = CreateDescriptorsByName();
 
@@ -631,11 +642,15 @@ public sealed class AliProductionCapabilityCatalogTests
                  })
         {
             var descriptor = byName[toolName];
-            AssertPermissionGuardedProcess(descriptor);
+            Assert.Equal(CapabilityEffectKind.ExternalRead, descriptor.Effect.Kind);
+            Assert.Equal(CapabilityMutationBoundary.None, descriptor.Effect.MutationBoundary);
+            Assert.True(descriptor.Effect.SupportsIdempotency);
             Assert.True(descriptor.Effect.ReadsLocalData);
-            Assert.True(descriptor.Effect.WritesLocalData);
+            Assert.False(descriptor.Effect.WritesLocalData);
             Assert.True(descriptor.Effect.UsesNetwork);
+            Assert.False(descriptor.Effect.StartsProcesses);
             Assert.False(descriptor.Effect.ChangesSystemState);
+            Assert.Null(descriptor.Effect.ReconcilerId);
         }
 
         var mutation = byName[AliCapabilityCatalog.MutateParticipantMemoryName];

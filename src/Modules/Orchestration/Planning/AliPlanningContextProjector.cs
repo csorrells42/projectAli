@@ -74,12 +74,14 @@ internal sealed class AliPlanningContextProjector
         AliPlanningTurnInput input,
         string capabilityDirectory,
         IReadOnlyList<AIFunctionDeclaration> selectedTools,
+        IReadOnlyCollection<string> expandableToolGroupIds,
         AliPlanningAttachmentProjection attachmentProjection,
         AIFunctionDeclaration protocol)
     {
         ArgumentNullException.ThrowIfNull(profile);
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(selectedTools);
+        ArgumentNullException.ThrowIfNull(expandableToolGroupIds);
         ArgumentNullException.ThrowIfNull(attachmentProjection);
         ArgumentNullException.ThrowIfNull(protocol);
 
@@ -214,6 +216,7 @@ internal sealed class AliPlanningContextProjector
                 capabilityDirectory,
                 selectedTools,
                 attachmentProjection,
+                expandableToolGroupIds,
                 slice);
             return new AliProjectedPlanningInput(
                 messages,

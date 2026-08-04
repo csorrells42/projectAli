@@ -252,17 +252,13 @@ public sealed class AliWorkstationFileAccess
     internal bool HasDurableTreeMutationBoundary => _treeMutations is not null;
 
     public string Instructions =>
-        "Use only relative paths beginning with one of these approved roots: "
-        + string.Join(", ", Mounts.Select(mount => mount.Name))
-        + ". Translate the user's named location directly: 'desktop' means Desktop/<file>, "
-        + "'documents' means Documents/<file>, 'downloads' means Downloads/<file>, and an export means Exports/<file>. "
-        + "For example, a request for touch.txt on the desktop must use Desktop/touch.txt. "
-        + "Never ask the user for an absolute path; if a path call fails, correct it with one of these virtual roots and retry. "
+        "Use only relative paths beneath Workspace/. "
+        + "Never ask the user for an absolute path; if a path call fails, correct it to Workspace/<path> and retry. "
         + "Read, list, and search files when useful. Delete can move either a file or a complete folder tree into recoverable trash. "
         + "Ali can also copy files or folders, create folders, inspect metadata and SHA-256 hashes, and create, list, or extract archives. "
         + "Copy and move require the destination parent folder to already exist; create that folder with the folder-creation tool first when needed. "
         + "ZIP is the default archive format. Use TAR, GZip, or TAR.GZ when the user requests one of those formats, and use 7-Zip only when the user explicitly requests 7z/7-Zip. "
-        + "For new artifacts, default to Exports unless the user names another approved root. "
+        + "Create every new artifact beneath Workspace/. "
         + "Write with overwrite=false when creating a new file. Existing-file overwrite, replace, line edits, and delete require approval. "
         + "A delete moves the selected file or folder into Ali's recoverable trash rather than erasing it permanently.";
 
@@ -277,45 +273,19 @@ public sealed class AliWorkstationFileAccess
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(userDataRoot);
         ArgumentException.ThrowIfNullOrWhiteSpace(profileDataRoot);
-        var profileRoot = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        if (string.IsNullOrWhiteSpace(profileRoot))
-        {
-            profileRoot = AppContext.BaseDirectory;
-        }
-
-        var desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
-        if (string.IsNullOrWhiteSpace(desktop))
-        {
-            desktop = Path.Combine(profileRoot, "Desktop");
-        }
-
-        var documents = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-        if (string.IsNullOrWhiteSpace(documents))
-        {
-            documents = Path.Combine(profileRoot, "Documents");
-        }
-
         var workspace = string.IsNullOrWhiteSpace(workspaceRootOverride)
             ? Path.Combine(userDataRoot, "Workspace")
             : Path.GetFullPath(Environment.ExpandEnvironmentVariables(workspaceRootOverride));
         var mounts = new[]
         {
-            new AliWorkstationFileMount("Workspace", workspace),
-            new AliWorkstationFileMount("Desktop", desktop),
-            new AliWorkstationFileMount("Documents", documents),
-            new AliWorkstationFileMount("Downloads", Path.Combine(profileRoot, "Downloads")),
-            new AliWorkstationFileMount("Exports", Path.Combine(profileDataRoot, "Exports"))
+            new AliWorkstationFileMount("Workspace", workspace)
         };
-        var store = new AliWorkstationFileStore(mounts, Path.Combine(userDataRoot, "RecoverableTrash"));
+        var store = new AliWorkstationFileStore(mounts, Path.Combine(workspace, ".ali-trash"));
         var audit = new AgentFileActionAuditStore(userDataRoot, activeUsers);
         return new AliWorkstationFileAccess(
             store,
             audit,
-            permissions,
-            durableOrchestrationRoot ?? Path.Combine(userDataRoot, "OrchestrationV2"),
-            string.IsNullOrWhiteSpace(assistantProfileBinding)
-                ? "ali-workstation-file-access-v1"
-                : assistantProfileBinding.Trim());
+            permissions);
     }
 
     public ValueTask<bool> ShouldAutoApproveAsync(ToolAutoApprovalRuleContext context) =>

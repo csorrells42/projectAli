@@ -32,6 +32,7 @@ public sealed class AliServices
     private readonly HttpClient _internetHttpClient;
     private readonly RuntimeCredentialStore _runtimeCredentials;
     private readonly RuntimeCapabilityProfileStore _runtimeCapabilityProfiles;
+    private readonly LocalVectorLibrarySettingsSnapshotOwner _localVectorLibrarySettings;
 
     public AliServices(
         string dataRoot,
@@ -53,6 +54,7 @@ public sealed class AliServices
         McpClientManager mcpClients,
         McpServerHost mcpServer,
         QdrantServiceManager qdrant,
+        LocalVectorLibrarySettingsSnapshotOwner localVectorLibrarySettings,
         IActiveUserSession activeUsers,
         ParticipantPresenceSnapshotBridge participantPresence,
         Mem0UserMemoryService userMemories,
@@ -84,6 +86,8 @@ public sealed class AliServices
         McpClients = mcpClients;
         McpServer = mcpServer;
         Qdrant = qdrant;
+        _localVectorLibrarySettings = localVectorLibrarySettings
+            ?? throw new ArgumentNullException(nameof(localVectorLibrarySettings));
         ActiveUsers = activeUsers;
         ParticipantPresence = participantPresence;
         UserMemories = userMemories;
@@ -198,13 +202,21 @@ public sealed class AliServices
             : _runtimeHttpClient;
 
     public LocalVectorLibrarySettings LoadLocalVectorLibrarySettings() =>
-        LocalVectorLibrarySettingsStore.LoadOrDefault(DataRoot);
+        _localVectorLibrarySettings.Capture().Settings;
 
-    public void SaveLocalVectorLibrarySettings(LocalVectorLibrarySettings settings) =>
-        LocalVectorLibrarySettingsStore.Save(DataRoot, settings);
+    public LocalVectorLibrarySettingsSnapshot SaveLocalVectorLibrarySettings(
+        LocalVectorLibrarySettings settings) =>
+        _localVectorLibrarySettings.Save(settings);
+
+    public LocalVectorLibrarySettingsSnapshot ReloadLocalVectorLibrarySettings() =>
+        _localVectorLibrarySettings.Reload();
+
+    public LocalVectorLibrarySettingsSnapshot SaveLocalVectorLibraryRootDirectory(
+        string rootDirectory) =>
+        _localVectorLibrarySettings.SaveRootDirectory(rootDirectory);
 
     public LocalVectorLibraryRetriever CreateLocalVectorLibraryRetriever() =>
-        new(DataRoot, _runtimeHttpClient, LoadLocalVectorLibrarySettings(), Qdrant);
+        new(DataRoot, _runtimeHttpClient, _localVectorLibrarySettings, Qdrant);
 
     public UserMemorySettings LoadUserMemorySettings() =>
         UserMemorySettingsStore.LoadOrDefault(DataRoot);
@@ -356,6 +368,7 @@ public sealed class AliServices
         var runtimeCredentials = new RuntimeCredentialStore(dataRoot);
         var runtimeCapabilityProfiles = new RuntimeCapabilityProfileStore(dataRoot);
         var qdrant = new QdrantServiceManager(dataRoot);
+        var localVectorLibrarySettings = new LocalVectorLibrarySettingsSnapshotOwner(dataRoot);
         var activeUsers = new ActiveUserSession(
             dataRoot,
             Path.Combine(userDataRoot, "Vision"));
@@ -374,7 +387,7 @@ public sealed class AliServices
         var mem0Client = new Mem0ProcessClient(
             userDataRoot,
             qdrant,
-            () => LocalVectorLibrarySettingsStore.LoadOrDefault(dataRoot),
+            () => localVectorLibrarySettings.Capture().Settings,
             () => UserMemorySettingsStore.LoadOrDefault(dataRoot),
             () => RuntimeSettingsStore.LoadOpenAiCompatibleOptions(dataRoot),
             new ProbedParticipantMemoryEmbeddingIdentitySource(runtimeHttpClient),
@@ -406,12 +419,16 @@ public sealed class AliServices
             fileAccess,
             durableOrchestrationRoot: durableOrchestrationRoot,
             assistantProfileBinding: assistantProfileBinding);
-        var localLibrary = new LocalVectorLibraryRetriever(dataRoot, runtimeHttpClient, qdrant: qdrant);
+        var localLibrary = new LocalVectorLibraryRetriever(
+            dataRoot,
+            runtimeHttpClient,
+            localVectorLibrarySettings,
+            qdrant);
         localLibrary.WriteExample();
         var semanticToolCatalog = new SettingsAwareSemanticToolCatalog(
             runtimeHttpClient,
             qdrant,
-            () => LocalVectorLibrarySettingsStore.LoadOrDefault(dataRoot));
+            localVectorLibrarySettings);
         var candidateRuntime = configuredOptions is { Enabled: true }
             ? new OpenAiCompatibleLocalModelRuntime(
                 LocalEndpointPolicy.IsRemote(configuredOptions.Endpoint)
@@ -509,6 +526,7 @@ public sealed class AliServices
                 mcpClients,
                 mcpServer,
                 qdrant,
+                localVectorLibrarySettings,
                 activeUsers,
                 participantPresence,
                 userMemories,

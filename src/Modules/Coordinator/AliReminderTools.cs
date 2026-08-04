@@ -30,10 +30,33 @@ internal sealed class AliReminderTools(
 
         var now = DateTimeOffset.UtcNow;
         var context = turnAccessor();
+        string reminderId;
+        if (context?.TryGetActiveToolCallId(
+                AliCapabilityCatalog.CreateCalendarEventName,
+                out _) == true)
+        {
+            if (!context.TryGetActiveDurableOperationId(
+                    AliCapabilityCatalog.CreateCalendarEventName,
+                    out var durableOperationId)
+                || string.IsNullOrWhiteSpace(durableOperationId))
+            {
+                return Task.FromResult(new CoordinatorReminderResult(
+                    false,
+                    "The calendar event was not scheduled because its durable operation identity is unavailable."));
+            }
+
+            reminderId = durableOperationId;
+        }
+        else
+        {
+            // The headless MCP server has no visible-turn execution context. Preserve that
+            // existing direct boundary while requiring the durable ID for Ali's agent loop.
+            reminderId = $"cal_{Guid.NewGuid():N}";
+        }
         try
         {
             var reminder = reminders.Save(new ReminderEntry(
-                $"cal_{Guid.NewGuid():N}",
+                reminderId,
                 title.Trim(),
                 title.Trim(),
                 dueAt,

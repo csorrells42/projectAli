@@ -12,14 +12,12 @@ internal sealed record GeminiGroundedSearchHit(
     string Content);
 
 /// <summary>
-/// A single-purpose Google Search grounding adapter. The endpoint and model are
-/// intentionally pinned so an API key cannot silently opt into a more expensive
-/// model. Source URLs are accepted only from Gemini's grounding metadata.
+/// A single-purpose Google Search grounding adapter. The endpoint and model come
+/// from Ali's persisted Internet settings. Source URLs are accepted only from
+/// Gemini's grounding metadata.
 /// </summary>
 internal sealed class GeminiGroundedSearchProvider
 {
-    internal const string PinnedModel = "gemini-3.5-flash-lite";
-    private const string EndpointRoot = "https://generativelanguage.googleapis.com/v1beta/models/";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         PropertyNameCaseInsensitive = true
@@ -77,6 +75,12 @@ internal sealed class GeminiGroundedSearchProvider
             return [];
         }
 
+        if (!TryBuildEndpoint(settings, out var endpoint, out var endpointFailure))
+        {
+            warnings.Add(endpointFailure);
+            return [];
+        }
+
         var reservation = usageLedger.TryReserve(settings, DateTimeOffset.UtcNow);
         if (!reservation.Allowed || string.IsNullOrWhiteSpace(reservation.ReservationId))
         {
@@ -86,7 +90,7 @@ internal sealed class GeminiGroundedSearchProvider
 
         using var request = new HttpRequestMessage(
             HttpMethod.Post,
-            EndpointRoot + PinnedModel + ":generateContent");
+            endpoint);
         request.Headers.Add("x-goog-api-key", apiKey.Trim());
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         var maxOutputTokens = Math.Clamp(settings.GeminiMaxOutputTokens, 128, 2048);
@@ -175,6 +179,38 @@ internal sealed class GeminiGroundedSearchProvider
             warnings.Add("Google grounded search failed safely: " + ex.Message);
             return [];
         }
+    }
+
+    private static bool TryBuildEndpoint(
+        WebSourceBackendSettings settings,
+        out Uri endpoint,
+        out string failure)
+    {
+        endpoint = null!;
+        failure = string.Empty;
+        var baseUrl = settings.GeminiBaseUrl?.Trim();
+        var model = settings.GeminiGroundedSearchModel?.Trim();
+        if (string.IsNullOrWhiteSpace(baseUrl)
+            || !Uri.TryCreate(baseUrl, UriKind.Absolute, out var baseUri)
+            || baseUri.Scheme != Uri.UriSchemeHttps)
+        {
+            failure = "Google grounded search has no valid HTTPS base URL in Internet settings.";
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(model))
+        {
+            failure = "Google grounded search has no model configured in Internet settings.";
+            return false;
+        }
+
+        var normalizedBase = baseUri.AbsoluteUri.EndsWith("/", StringComparison.Ordinal)
+            ? baseUri
+            : new Uri(baseUri.AbsoluteUri + "/", UriKind.Absolute);
+        endpoint = new Uri(
+            normalizedBase,
+            Uri.EscapeDataString(model) + ":generateContent");
+        return true;
     }
 
     private static IReadOnlyList<GeminiGroundedSearchHit> BuildHits(

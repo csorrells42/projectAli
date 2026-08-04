@@ -57,6 +57,78 @@ public sealed class PlanningContractTests
     }
 
     [Fact]
+    public void DynamicExpandToolsContract_ExposesOnlyExactExpandableGroupIds()
+    {
+        var expandableGroupIds = new[] { "files", "current-information" };
+        var decisionSchema = AliOrchestrationProtocol.BuildDecisionSchema(
+            [],
+            expandableGroupIds);
+        var expandBranch = decisionSchema.GetProperty("properties")
+            .GetProperty("nextAction")
+            .GetProperty("oneOf")
+            .EnumerateArray()
+            .Single(branch => branch.GetProperty("properties")
+                .GetProperty("kind")
+                .GetProperty("const")
+                .GetString() == "expandTools");
+        var allowed = expandBranch.GetProperty("properties")
+            .GetProperty("need")
+            .GetProperty("enum")
+            .EnumerateArray()
+            .Select(item => item.GetString()!)
+            .ToArray();
+        var transport = AliOrchestrationProtocol.CreateDeclaration(
+            [],
+            expandableGroupIds).JsonSchema.GetRawText();
+
+        Assert.Equal(["current-information", "files"], allowed);
+        Assert.Contains("current-information", transport, StringComparison.Ordinal);
+        Assert.Contains("files", transport, StringComparison.Ordinal);
+        Assert.Contains("Never substitute a group name or prose description", transport, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DynamicExpandToolsContract_OmitsExpansionWhenNoDrawerRemainsExpandable()
+    {
+        var decisionSchema = AliOrchestrationProtocol.BuildDecisionSchema([], []);
+        var actionKinds = decisionSchema.GetProperty("properties")
+            .GetProperty("nextAction")
+            .GetProperty("oneOf")
+            .EnumerateArray()
+            .Select(branch => branch.GetProperty("properties")
+                .GetProperty("kind")
+                .GetProperty("const")
+                .GetString())
+            .ToArray();
+        var transport = AliOrchestrationProtocol.CreateDeclaration(
+            [],
+            []).JsonSchema.GetRawText();
+
+        Assert.DoesNotContain("expandTools", actionKinds);
+        Assert.Contains(
+            "No capability drawer is currently expandable; do not use expandTools",
+            transport,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PlannerPrompt_PrioritizesOnePassDirectConversationWithoutOpeningDiscovery()
+    {
+        var messages = new AliStateBackedChatHistoryAdapter().BuildMessages(
+            "hello",
+            new AliPlanningTurnInput(0, "{}"),
+            "capability directory",
+            [],
+            AliPlanningAttachmentProjection.Empty,
+            expandableToolGroupIds: ["capability-discovery"]);
+        var systemPrompt = messages[0].Text;
+
+        Assert.Contains("Use AnswerDirectly immediately for greetings", systemPrompt, StringComparison.Ordinal);
+        Assert.Contains("Never open capability discovery", systemPrompt, StringComparison.Ordinal);
+        Assert.Contains("answer directly now", systemPrompt, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ProviderTransportDecoders_RejectRawV1Decisions()
     {
         var rawDecision = DecisionJson(

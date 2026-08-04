@@ -209,6 +209,9 @@ internal sealed class CapabilityPermissionProjectionAIFunction(
     AIFunction rawFunction,
     AliToolPermissionPolicy policy) : DelegatingAIFunction(initialFunction)
 {
+    public AIFunction ProjectWithoutApproval() =>
+        policy.Apply(rawFunction, requiresApproval: false);
+
     public AIFunction Project(
         AgentPermissionProfile profile,
         bool requireAdditionalApproval = false) =>

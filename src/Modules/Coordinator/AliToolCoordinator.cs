@@ -260,8 +260,8 @@ public sealed class AliToolCoordinator : IDisposable
                 }
                 catch (OperationCanceledException) when (streamLifetime.IsCancellationRequested)
                 {
-                    // Consumer disposal revokes any publication that was not yet durably
-                    // acknowledged by the conversation sink.
+                    // Consumer disposal revokes any publication that was not yet exactly
+                    // acknowledged by the live conversation sink.
                 }
             }
         }
@@ -417,15 +417,14 @@ public sealed class AliToolCoordinator : IDisposable
         using var turnScope = _turn.Enter(turn);
         try
         {
-            var resumeIdentity = await _harness
-                .FindPausedTurnAsync(turn, cancellationToken)
-                .ConfigureAwait(false);
             async ValueTask<FinalAnswerPublicationAcknowledgment> PublishFinalAsync(
                 FinalAnswerPublication publication,
                 CancellationToken publicationCancellation)
             {
                 publicationCancellation.ThrowIfCancellationRequested();
-                var delivery = new FinalAnswerPublicationDelivery(publication);
+                var delivery = new FinalAnswerPublicationDelivery(
+                    publication,
+                    FinalAnswerPublicationDisposition.DisplayedInMemory);
                 var accepted = writer.TryWrite(new AssistantStreamChunk(
                     publication.ConversationId,
                     publication.UserMessageId,
@@ -444,22 +443,13 @@ public sealed class AliToolCoordinator : IDisposable
                 return await delivery.WaitAsync(publicationCancellation).ConfigureAwait(false);
             }
 
-            var result = resumeIdentity is null
-                ? await _harness.RunAsync(
-                    turn,
-                    userText,
-                    history,
-                    attachments,
-                    PublishFinalAsync,
-                    cancellationToken).ConfigureAwait(false)
-                : await _harness.ResumeAsync(
-                    turn,
-                    resumeIdentity,
-                    userText,
-                    history,
-                    attachments,
-                    PublishFinalAsync,
-                    cancellationToken).ConfigureAwait(false);
+            var result = await _harness.RunAsync(
+                turn,
+                userText,
+                history,
+                attachments,
+                PublishFinalAsync,
+                cancellationToken).ConfigureAwait(false);
 
             if (result.Paused)
             {

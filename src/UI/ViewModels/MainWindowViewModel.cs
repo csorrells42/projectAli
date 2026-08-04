@@ -2657,8 +2657,10 @@ public sealed class MainWindowViewModel : ObservableObject
         var userMessageId = recoveryContext?.UserMessageId ?? $"msg_user_{Guid.NewGuid():N}";
         var assistantMessageId = recoveryContext?.AssistantMessageId
             ?? $"msg_asst_{Guid.NewGuid():N}";
-        var attachments = Attachments.Select(attachment => attachment.ToCoreAttachment()).ToList();
-        var attachmentMetadata = Attachments.Select(ToStoredAttachmentMetadata).ToList();
+        // Binary attachments are intentionally outside the current release path. They must
+        // never delay, overflow, or survive into an otherwise independent text request.
+        var attachments = new List<ChatAttachment>();
+        var attachmentMetadata = new List<StoredAttachmentMetadata>();
         ChatMessageViewModel? userMessage = null;
         ChatMessageViewModel assistantMessage;
         if (isRecoveryDecision)
@@ -2719,6 +2721,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _activeResponse = responseCancellation;
         var streamingSpeech = StartStreamingSpeechIfNeeded(inputOrigin);
         var completed = false;
+        var finalPublicationAcknowledged = false;
         var reachedOutputLimit = false;
         var durableTurnPaused = false;
         var pendingVisibleText = new StringBuilder();
@@ -2833,35 +2836,49 @@ public sealed class MainWindowViewModel : ObservableObject
                     {
                         await FlushVisibleTextAsync(force: true, pace: false).ConfigureAwait(true);
                         assistantMessage.IsResponseComplete = true;
-                        var saved = SaveActiveConversation()
-                            ?? throw new InvalidOperationException(
-                                "The exact final answer could not be saved to the active conversation.");
-                        var persisted = saved.Messages.SingleOrDefault(message =>
-                            string.Equals(
-                                message.MessageId,
-                                assistantMessage.Id,
-                                StringComparison.Ordinal));
-                        if (persisted is null
-                            || persisted.Role != ChatRole.Assistant
-                            || !string.Equals(
-                                persisted.Text,
-                                assistantMessage.Text,
-                                StringComparison.Ordinal))
+                        if (finalDelivery.RequiresPersistence)
                         {
-                            throw new InvalidDataException(
-                                "The conversation store returned a different final assistant message.");
+                            var saved = SaveActiveConversation()
+                                ?? throw new InvalidOperationException(
+                                    "The exact final answer could not be saved to the active conversation.");
+                            var persisted = saved.Messages.SingleOrDefault(message =>
+                                string.Equals(
+                                    message.MessageId,
+                                    assistantMessage.Id,
+                                    StringComparison.Ordinal));
+                            if (persisted is null
+                                || persisted.Role != ChatRole.Assistant
+                                || !string.Equals(
+                                    persisted.Text,
+                                    assistantMessage.Text,
+                                    StringComparison.Ordinal))
+                            {
+                                throw new InvalidDataException(
+                                    "The conversation store returned a different final assistant message.");
+                            }
+
+                            finalDelivery.AcknowledgePersisted(
+                                saved.ConversationId,
+                                persisted.MessageId,
+                                persisted.Text);
+                        }
+                        else
+                        {
+                            finalDelivery.AcknowledgeDisplayed(
+                                chunk.ConversationId,
+                                assistantMessage.Id,
+                                assistantMessage.Text);
                         }
 
-                        finalDelivery.AcknowledgePersisted(
-                            saved.ConversationId,
-                            persisted.MessageId,
-                            persisted.Text);
+                        finalPublicationAcknowledged = true;
                     }
                 }
                 catch
                 {
                     finalDelivery?.Reject(
-                        "The desktop conversation sink did not persist the exact final answer.");
+                        finalDelivery.RequiresPersistence
+                            ? "The desktop conversation sink did not persist the exact final answer."
+                            : "The desktop conversation sink did not display the exact final answer.");
                     throw;
                 }
             }
@@ -2976,9 +2993,13 @@ public sealed class MainWindowViewModel : ObservableObject
             {
                 ClearTemporaryAttachments();
             }
-            SaveActiveConversation();
+            if (ShouldSaveConversationAtTurnTeardown(finalPublicationAcknowledged))
+            {
+                SaveActiveConversation();
+            }
             UpdateRuntimeStatus();
-            RefreshMemoryReminders();
+            // Ordinary turns must not reread legacy memory/reminder files on the response path.
+            // Their explicit UI commands and background services own refresh work.
         }
     }
 
@@ -3529,6 +3550,11 @@ public sealed class MainWindowViewModel : ObservableObject
         var saved = _services.Conversations.Save(conversation);
         RefreshConversationHistory();
         return saved;
+    }
+
+    internal static bool ShouldSaveConversationAtTurnTeardown(bool finalPublicationAcknowledged)
+    {
+        return !finalPublicationAcknowledged;
     }
 
     private void RefreshMemoryReminders()
@@ -4826,10 +4852,12 @@ public sealed class MainWindowViewModel : ObservableObject
         var settings = new WebSourceBackendSettings
         {
             Enabled = InternetBackendEnabled,
+            CurrentSearchProviderOrder = existing.CurrentSearchProviderOrder.ToList(),
             GeminiGroundedSearchEnabled = canEditGoogleBilling ? InternetGeminiGroundedSearchEnabled : existing.GeminiGroundedSearchEnabled,
             GeminiApiKeyEnvironmentVariable = existing.GeminiApiKeyEnvironmentVariable,
             GeminiApiKey = canEditGoogleBilling ? NullIfWhiteSpace(InternetGeminiApiKeyText) : existing.GeminiApiKey,
-            GeminiGroundedSearchModel = GeminiGroundedSearchProvider.PinnedModel,
+            GeminiBaseUrl = existing.GeminiBaseUrl,
+            GeminiGroundedSearchModel = existing.GeminiGroundedSearchModel,
             GeminiMaxOutputTokens = existing.GeminiMaxOutputTokens,
             GeminiMaxRequestsPerHour = canEditGoogleBilling ? geminiHourlyLimit : existing.GeminiMaxRequestsPerHour,
             GeminiMaxRequestsPerDay = canEditGoogleBilling ? geminiDailyLimit : existing.GeminiMaxRequestsPerDay,

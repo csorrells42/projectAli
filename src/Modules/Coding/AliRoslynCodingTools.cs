@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Xml.Linq;
 using Ali.Modules.Coding.Execution;
+using Ali.Modules.Coordinator;
 
 namespace Ali.Modules.Coding;
 
@@ -1562,6 +1563,11 @@ internal sealed class AliRoslynCodingTools
         string detail,
         CancellationToken cancellationToken)
     {
+        if (AliCoreAssistantExecutionContext.IsActive)
+        {
+            return;
+        }
+
         var entry = JsonSerializer.Serialize(new
         {
             timestampUtc = DateTimeOffset.UtcNow,

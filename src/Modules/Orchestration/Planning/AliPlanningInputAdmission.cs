@@ -311,20 +311,9 @@ internal sealed class AliModelAwarePlanningInputCounter : IAliPlanningInputCount
                 }
             }
 
-            foreach (var tool in selectedTools)
-            {
-                if (tool is null)
-                {
-                    return Unsafe("null-selected-tool");
-                }
-
-                AddTool(tool);
-            }
-
-            // Planning sends the orchestration protocol either as a required native function or
-            // as the compatibility response schema, so charge it once in both planning modes.
-            // Protocol-based completion sends only its composition protocol and therefore charges
-            // it once through this same argument without adding any task tools.
+            // Selected task schemas are already serialized into the authoritative planning
+            // projection. Charging them again here double-counts bytes that are sent only once.
+            // The transport protocol itself is a separate API schema and is charged once.
             if (protocol is not null)
             {
                 AddTool(protocol);

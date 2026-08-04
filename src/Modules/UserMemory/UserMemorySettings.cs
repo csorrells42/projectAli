@@ -16,6 +16,8 @@ public sealed record UserMemorySettings
 
     public int HealthTimeoutMilliseconds { get; init; } = 3000;
 
+    public int ColdStartHealthTimeoutMilliseconds { get; init; } = 15000;
+
     public int RepairTimeoutMilliseconds { get; init; } = 30000;
 
     // Mem0 v1.1 returns a normalized hybrid score. When BM25 is available it
@@ -49,6 +51,10 @@ public sealed record UserMemorySettings
         RecallTimeoutMilliseconds = Math.Clamp(RecallTimeoutMilliseconds, 250, 5000),
         MutationTimeoutMilliseconds = Math.Clamp(MutationTimeoutMilliseconds, 500, 15000),
         HealthTimeoutMilliseconds = Math.Clamp(HealthTimeoutMilliseconds, 250, 5000),
+        ColdStartHealthTimeoutMilliseconds = Math.Clamp(
+            ColdStartHealthTimeoutMilliseconds,
+            Math.Clamp(HealthTimeoutMilliseconds, 250, 5000),
+            30000),
         RepairTimeoutMilliseconds = Math.Clamp(RepairTimeoutMilliseconds, 1000, 60000),
         RecallMinimumScore = Math.Clamp(RecallMinimumScore, 0, 1),
         RecallScoreWindow = Math.Clamp(RecallScoreWindow, 0, 0.25),

@@ -10,18 +10,40 @@ public static class AliOrchestrationProtocol
     public const string DecisionJsonPropertyName = "decisionJson";
 
     public static AIFunctionDeclaration CreateDeclaration(
-        IEnumerable<AIFunctionDeclaration>? selectedTaskTools)
+        IEnumerable<AIFunctionDeclaration>? selectedTaskTools,
+        IEnumerable<string>? expandableToolGroupIds = null)
     {
         _ = selectedTaskTools;
+        var exactGroupIds = SnapshotGroupIds(expandableToolGroupIds);
         var invariant = OrchestrationProtocolCapability.CreateInvariantFunction();
         return AIFunctionFactory.CreateDeclaration(
             invariant.Name,
             invariant.Description
             + " The decisionJson argument contains the complete strict decision object as JSON text.",
-            BuildTransportSchema());
+            BuildTransportSchema(expandableToolGroupIds is null ? null : exactGroupIds));
     }
 
-    public static JsonElement BuildTransportSchema() =>
+    public static JsonElement BuildTransportSchema(
+        IEnumerable<string>? expandableToolGroupIds = null)
+    {
+        var exactGroupIds = SnapshotGroupIds(expandableToolGroupIds);
+        var decisionDescription =
+            "The complete strict protocol payload serialized as one JSON object.";
+        if (exactGroupIds.Count > 0)
+        {
+            decisionDescription +=
+                " If nextAction.kind is expandTools, nextAction.need must equal exactly one "
+                + "of these currently expandable groupId tokens: "
+                + string.Join(", ", exactGroupIds)
+                + ". Never substitute a group name or prose description.";
+        }
+        else if (expandableToolGroupIds is not null)
+        {
+            decisionDescription +=
+                " No capability drawer is currently expandable; do not use expandTools.";
+        }
+
+        return
         JsonSerializer.SerializeToElement(ObjectSchema(
             [DecisionJsonPropertyName],
             new Dictionary<string, object?>
@@ -29,15 +51,17 @@ public static class AliOrchestrationProtocol
                 [DecisionJsonPropertyName] = new Dictionary<string, object?>
                 {
                     ["type"] = "string",
-                    ["description"] =
-                        "The complete strict protocol payload serialized as one JSON object."
+                    ["description"] = decisionDescription
                 }
             }));
+    }
 
     public static JsonElement BuildDecisionSchema(
-        IEnumerable<AIFunctionDeclaration>? selectedTaskTools)
+        IEnumerable<AIFunctionDeclaration>? selectedTaskTools,
+        IEnumerable<string>? expandableToolGroupIds = null)
     {
         var tools = SnapshotTools(selectedTaskTools);
+        var exactGroupIds = SnapshotGroupIds(expandableToolGroupIds);
         var toolSchemas = tools
             .Select((tool, index) => new
             {
@@ -49,13 +73,18 @@ public static class AliOrchestrationProtocol
         var actionBranches = new List<object>();
         actionBranches.AddRange(toolSchemas.Select(item =>
             BuildCallToolActionSchema(item.Tool, item.SchemaKey)));
-        actionBranches.Add(ObjectSchema(
-            ["kind", "need"],
-            new Dictionary<string, object?>
-            {
-                ["kind"] = ConstString("expandTools"),
-                ["need"] = BoundedString(1, 2_000)
-            }));
+        if (expandableToolGroupIds is null || exactGroupIds.Count > 0)
+        {
+            actionBranches.Add(ObjectSchema(
+                ["kind", "need"],
+                new Dictionary<string, object?>
+                {
+                    ["kind"] = ConstString("expandTools"),
+                    ["need"] = expandableToolGroupIds is null
+                        ? BoundedString(1, 2_000)
+                        : EnumString(exactGroupIds.ToArray())
+                }));
+        }
         actionBranches.Add(ObjectSchema(
             ["kind", "afterCursor", "snapshotCursor", "pageSize"],
             new Dictionary<string, object?>
@@ -158,6 +187,14 @@ public static class AliOrchestrationProtocol
             .GroupBy(tool => tool.Name, StringComparer.Ordinal)
             .Select(group => group.First())
             .OrderBy(tool => tool.Name, StringComparer.Ordinal)
+            .ToArray();
+
+    private static IReadOnlyList<string> SnapshotGroupIds(
+        IEnumerable<string>? expandableToolGroupIds) =>
+        (expandableToolGroupIds ?? [])
+            .Where(static groupId => !string.IsNullOrWhiteSpace(groupId))
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
             .ToArray();
 
     private static object BuildCallToolActionSchema(

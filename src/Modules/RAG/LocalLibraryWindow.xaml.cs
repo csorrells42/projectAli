@@ -160,8 +160,9 @@ public partial class LocalLibraryWindow : Window
         try
         {
             var fullPath = Path.GetFullPath(folder);
-            _settings = _settings with { RootDirectory = fullPath };
-            _services.SaveLocalVectorLibrarySettings(_settings);
+            _settings = _services
+                .SaveLocalVectorLibraryRootDirectory(fullPath)
+                .Settings;
             Directory.CreateDirectory(fullPath);
             StatusText.Text = "Local library settings saved.";
             RefreshIndexSummary();

@@ -177,8 +177,13 @@ public sealed class Checkpoint8RegressionEvidenceTests
         Assert.Equal(first.VisibleActivity, replay.VisibleActivity);
         Assert.Equal("read_file", first.ReturnedToolName);
         Assert.Equal(2, first.Decisions.Length);
-        Assert.Single(first.VisibleActivity);
-        Assert.Contains("ToolCall", first.VisibleActivity[0], StringComparison.Ordinal);
+        Assert.Equal(2, first.VisibleActivity.Length);
+        Assert.Contains(
+            first.VisibleActivity,
+            activity => activity.Contains("Opening tools:", StringComparison.Ordinal));
+        Assert.Contains(
+            first.VisibleActivity,
+            activity => activity.Contains("ToolCall", StringComparison.Ordinal));
     }
 
     [Theory]
@@ -246,7 +251,7 @@ public sealed class Checkpoint8RegressionEvidenceTests
         var tool = ReadFileTool();
         var inner = new ScriptedChatClient(
             Compatibility(PlanningContractTests.DecisionJson(
-                "{\"kind\":\"expandTools\",\"need\":\"Read the requested file\"}")),
+                ExpandToolsJson(tool))),
             Compatibility(PlanningContractTests.ToolDecisionJson(
                 "read_file", "path", "README.md")));
         var semantic = new RecordingSemanticCatalog([tool]);
@@ -509,6 +514,18 @@ public sealed class Checkpoint8RegressionEvidenceTests
         (string path) => path,
         "read_file",
         "Read a file by exact path.");
+
+    private static string ExpandToolsJson(AIFunctionDeclaration tool)
+    {
+        var bucket = Assert.Single(
+            LiveSemanticToolDirectory.CreateBoundedDirectoryBuckets([tool]),
+            candidate => candidate.ToolNames.Contains(tool.Name, StringComparer.Ordinal));
+        return JsonSerializer.Serialize(new
+        {
+            kind = "expandTools",
+            need = bucket.Id
+        });
+    }
 
     private static ChatResponse Compatibility(string decisionJson) =>
         new(new ChatMessage(

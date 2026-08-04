@@ -1566,13 +1566,14 @@ public sealed class Mem0UserMemoryService :
             return new(true, false, false, string.Empty, settings.CollectionName, staleFailure);
         }
 
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromMilliseconds(settings.HealthTimeoutMilliseconds));
+        using var embeddingTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        embeddingTimeout.CancelAfter(TimeSpan.FromMilliseconds(settings.HealthTimeoutMilliseconds));
         Mem0EmbeddingSpaceConfiguration space;
         try
         {
-            space = await _client.ResolveCurrentEmbeddingSpaceAsync(timeout.Token)
+            space = await _client.ResolveCurrentEmbeddingSpaceAsync(embeddingTimeout.Token)
                 .ConfigureAwait(false);
+            embeddingTimeout.CancelAfter(Timeout.InfiniteTimeSpan);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -1659,14 +1660,14 @@ public sealed class Mem0UserMemoryService :
                 dispatchUtc,
                 _receiptAuthority,
                 permissionOperation);
-            var response = await SendAsync(new
+            var response = await SendHealthAsync(new
             {
                 operation = "participant_health",
                 embeddingSpaceId = space.Id,
                 tenantId = normalized.TenantId,
                 rosterRevision = normalized.Revision,
                 authorizedAccessKeys
-            }, timeout.Token).ConfigureAwait(false);
+            }, settings, cancellationToken).ConfigureAwait(false);
             if (!response.Success)
             {
                 return new(
@@ -2747,6 +2748,26 @@ public sealed class Mem0UserMemoryService :
     {
         var response = await _client.SendAsync(request, cancellationToken).ConfigureAwait(false);
         return response;
+    }
+
+    private async Task<Mem0Response> SendHealthAsync(
+        object request,
+        UserMemorySettings settings,
+        CancellationToken cancellationToken)
+    {
+        var steadyStateTimeout = TimeSpan.FromMilliseconds(settings.HealthTimeoutMilliseconds);
+        if (_client is IParticipantMemoryHealthTransport healthTransport)
+        {
+            return await healthTransport.SendHealthAsync(
+                request,
+                steadyStateTimeout,
+                TimeSpan.FromMilliseconds(settings.ColdStartHealthTimeoutMilliseconds),
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(steadyStateTimeout);
+        return await _client.SendAsync(request, timeout.Token).ConfigureAwait(false);
     }
 
     private async Task<ParticipantMemoryAuthenticationReceipt?> TryAuthenticateAsync(

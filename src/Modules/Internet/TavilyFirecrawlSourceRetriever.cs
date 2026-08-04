@@ -109,16 +109,34 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
                 plan.RequiresSourceGrounding);
         }
 
-        var results = await ScrapeDirectUrlsAsync(plan, warnings, cancellationToken).ConfigureAwait(false);
-        if (results.Count == 0)
+        var results = await ExecuteWithRequestTimeoutAsync(
+            "Direct page retrieval",
+            token => ScrapeDirectUrlsAsync(plan, warnings, token),
+            (IReadOnlyList<WebSearchResult>)Array.Empty<WebSearchResult>(),
+            warnings,
+            cancellationToken).ConfigureAwait(false);
+        foreach (var provider in ResolveCurrentSearchProviderOrder(warnings))
         {
-            if (plan.ExcludedProviders.Contains(SourceProviderNames.GoogleGrounding))
+            if (results.Count > 0)
+            {
+                break;
+            }
+
+            if (provider is InternetSearchProvider.GoogleGroundedSearch
+                && plan.ExcludedProviders.Contains(SourceProviderNames.GoogleGrounding))
             {
                 warnings.Add("Google grounding was skipped because this turn exhausted its Google allowance or the exact query already returned no usable Google result.");
+                continue;
             }
-            else
+
+            results = await SearchProviderWithTimeoutAsync(
+                provider,
+                query,
+                plan,
+                warnings,
+                cancellationToken).ConfigureAwait(false);
+            if (provider is InternetSearchProvider.GoogleGroundedSearch)
             {
-                results = await SearchWithGeminiAsync(query, plan, warnings, cancellationToken).ConfigureAwait(false);
                 providerAttempts.Add(new SourceProviderAttempt(
                     SourceProviderNames.GoogleGrounding,
                     query,
@@ -128,29 +146,9 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
 
         if (results.Count == 0)
         {
-            results = await SearchWithTavilyAsync(query, plan, warnings, cancellationToken).ConfigureAwait(false);
-        }
-
-        if (results.Count == 0)
-        {
-            results = await SearchWithFirecrawlAsync(query, plan, warnings, cancellationToken).ConfigureAwait(false);
-        }
-
-        if (results.Count == 0)
-        {
-            results = await SearchWithBraveAsync(query, plan, warnings, cancellationToken).ConfigureAwait(false);
-        }
-
-        if (results.Count == 0)
-        {
-            results = await SearchWithSerperAsync(query, plan, warnings, cancellationToken).ConfigureAwait(false);
-        }
-
-        if (results.Count == 0)
-        {
             if (warnings.Count == 0)
             {
-                warnings.Add("No internet search results were returned by Google grounding, Tavily, Firecrawl, Brave Search, or Serper.");
+                warnings.Add("No configured current-search provider returned usable internet results.");
             }
 
             return new SourceRetrievalResult(
@@ -174,11 +172,20 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
                 && excerpts.Count < maxExtractedPages
                 && !result.Provider.Equals("Firecrawl", StringComparison.OrdinalIgnoreCase)
                 && !result.Provider.Equals("Google Grounding", StringComparison.OrdinalIgnoreCase)
-                && (string.IsNullOrWhiteSpace(excerpt) || excerpt.Length < 600)
+                && string.IsNullOrWhiteSpace(excerpt)
                 && !string.IsNullOrWhiteSpace(result.Url))
             {
-                var scraped = await TryScrapeWithFirecrawlAsync(result.Url, warnings, cancellationToken).ConfigureAwait(false);
-                scraped ??= await TryExtractDirectHtmlAsync(result.Url, warnings, cancellationToken).ConfigureAwait(false);
+                var scraped = await ExecuteWithRequestTimeoutAsync(
+                    "Page extraction",
+                    async token =>
+                    {
+                        var content = await TryScrapeWithFirecrawlAsync(result.Url, warnings, token).ConfigureAwait(false);
+                        content ??= await TryExtractDirectHtmlAsync(result.Url, warnings, token).ConfigureAwait(false);
+                        return content;
+                    },
+                    (string?)null,
+                    warnings,
+                    cancellationToken).ConfigureAwait(false);
                 if (!string.IsNullOrWhiteSpace(scraped))
                 {
                     excerpt = scraped;
@@ -239,15 +246,12 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
                 ProviderRemainingUnavailable(provider));
         }
 
-        var results = provider switch
-        {
-            InternetSearchProvider.GoogleGroundedSearch => await SearchWithGeminiAsync(testQuery, plan, warnings, cancellationToken).ConfigureAwait(false),
-            InternetSearchProvider.Tavily => await SearchWithTavilyAsync(testQuery, plan, warnings, cancellationToken).ConfigureAwait(false),
-            InternetSearchProvider.Firecrawl => await SearchWithFirecrawlAsync(testQuery, plan, warnings, cancellationToken).ConfigureAwait(false),
-            InternetSearchProvider.BraveSearch => await SearchWithBraveAsync(testQuery, plan, warnings, cancellationToken).ConfigureAwait(false),
-            InternetSearchProvider.Serper => await SearchWithSerperAsync(testQuery, plan, warnings, cancellationToken).ConfigureAwait(false),
-            _ => Array.Empty<WebSearchResult>()
-        };
+        var results = await SearchProviderWithTimeoutAsync(
+            provider,
+            testQuery,
+            plan,
+            warnings,
+            cancellationToken).ConfigureAwait(false);
 
         var remaining = (provider is InternetSearchProvider.GoogleGroundedSearch ? geminiGroundedSearch.UsageStatus() : null)
                         ?? (provider is InternetSearchProvider.Tavily ? TryReadTavilyUsageWarning(warnings) : null)
@@ -276,14 +280,9 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
         string? query,
         CancellationToken cancellationToken)
     {
-        foreach (var provider in new[]
-                 {
-                     InternetSearchProvider.GoogleGroundedSearch,
-                     InternetSearchProvider.Tavily,
-                     InternetSearchProvider.Firecrawl,
-                     InternetSearchProvider.BraveSearch,
-                     InternetSearchProvider.Serper
-                 })
+        settings = settingsProvider() ?? new WebSourceBackendSettings();
+        var warnings = new List<string>();
+        foreach (var provider in ResolveCurrentSearchProviderOrder(warnings))
         {
             if (!IsProviderConfigured(provider))
             {
@@ -297,6 +296,102 @@ public sealed class TavilyFirecrawlSourceRetriever : ISourceRetriever
         }
 
         return Array.Empty<InternetBackendProviderProbeResult>();
+    }
+
+    private IReadOnlyList<InternetSearchProvider> ResolveCurrentSearchProviderOrder(List<string> warnings)
+    {
+        var configured = settings.CurrentSearchProviderOrder;
+        if (configured is null || configured.Count == 0)
+        {
+            warnings.Add("currentSearchProviderOrder is empty; no internet search provider was selected.");
+            return [];
+        }
+
+        var providers = new List<InternetSearchProvider>(configured.Count);
+        foreach (var providerId in configured)
+        {
+            if (string.IsNullOrWhiteSpace(providerId)
+                || int.TryParse(providerId, NumberStyles.Integer, CultureInfo.InvariantCulture, out _)
+                || !Enum.TryParse<InternetSearchProvider>(providerId.Trim(), ignoreCase: true, out var provider)
+                || !Enum.IsDefined(provider))
+            {
+                AddWarningOnce(
+                    warnings,
+                    $"Configured current-search provider '{providerId ?? "<null>"}' is not recognized and was skipped.");
+                continue;
+            }
+
+            if (providers.Contains(provider))
+            {
+                AddWarningOnce(
+                    warnings,
+                    $"Configured current-search provider '{providerId}' appears more than once and its duplicate was skipped.");
+                continue;
+            }
+
+            providers.Add(provider);
+        }
+
+        return providers;
+    }
+
+    private Task<IReadOnlyList<WebSearchResult>> SearchProviderWithTimeoutAsync(
+        InternetSearchProvider provider,
+        string query,
+        SourceQueryPlan plan,
+        List<string> warnings,
+        CancellationToken cancellationToken) =>
+        ExecuteWithRequestTimeoutAsync(
+            ProviderDisplayName(provider),
+            token => provider switch
+            {
+                InternetSearchProvider.GoogleGroundedSearch => SearchWithGeminiAsync(query, plan, warnings, token),
+                InternetSearchProvider.Tavily => SearchWithTavilyAsync(query, plan, warnings, token),
+                InternetSearchProvider.Firecrawl => SearchWithFirecrawlAsync(query, plan, warnings, token),
+                InternetSearchProvider.BraveSearch => SearchWithBraveAsync(query, plan, warnings, token),
+                InternetSearchProvider.Serper => SearchWithSerperAsync(query, plan, warnings, token),
+                _ => Task.FromResult<IReadOnlyList<WebSearchResult>>(Array.Empty<WebSearchResult>())
+            },
+            (IReadOnlyList<WebSearchResult>)Array.Empty<WebSearchResult>(),
+            warnings,
+            cancellationToken);
+
+    private async Task<T> ExecuteWithRequestTimeoutAsync<T>(
+        string operation,
+        Func<CancellationToken, Task<T>> execute,
+        T timeoutResult,
+        List<string> warnings,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var timeoutSeconds = settings.RequestTimeoutSeconds;
+        var timeout = TimeSpan.FromSeconds(timeoutSeconds);
+        if (timeoutSeconds <= 0 || timeout.TotalMilliseconds > uint.MaxValue - 1d)
+        {
+            AddWarningOnce(
+                warnings,
+                $"Internet request timeout '{timeoutSeconds}' seconds cannot be honored; {operation} was skipped.");
+            return timeoutResult;
+        }
+
+        using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutSource.CancelAfter(timeout);
+        try
+        {
+            var result = await execute(timeoutSource.Token).ConfigureAwait(false);
+            if (timeoutSource.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+            {
+                AddWarningOnce(warnings, $"{operation} timed out after {timeoutSeconds} second(s).");
+            }
+            return result;
+        }
+        catch (OperationCanceledException) when (
+            timeoutSource.IsCancellationRequested
+            && !cancellationToken.IsCancellationRequested)
+        {
+            AddWarningOnce(warnings, $"{operation} timed out after {timeoutSeconds} second(s).");
+            return timeoutResult;
+        }
     }
 
     private async Task<IReadOnlyList<WebSearchResult>> ScrapeDirectUrlsAsync(

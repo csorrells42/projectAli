@@ -69,6 +69,29 @@ public sealed class AliProductionCompositionIntegrationTests
             AliCapabilityCatalog.DotNetDeliveryVerifyName
         }.ToHashSet(StringComparer.Ordinal);
 
+    private static readonly IReadOnlySet<string> ExpectedDurableEffectAdapterToolNames =
+        new[]
+        {
+            AliCapabilityCatalog.MutateParticipantMemoryName,
+            AliCapabilityCatalog.ConsentParticipantMemoryProposalName,
+            AliCapabilityCatalog.ReconcileParticipantMemoryMutationName,
+            AliCapabilityCatalog.CreateCalendarEventName
+        }.ToHashSet(StringComparer.Ordinal);
+
+    private static readonly IReadOnlySet<string> ExpectedRestoredOrdinaryToolNames =
+        new[]
+        {
+            AliCapabilityCatalog.RecallUserMemoryName,
+            AliCapabilityCatalog.ListCurrentUserMemoriesName,
+            AliCapabilityCatalog.MutateParticipantMemoryName,
+            AliCapabilityCatalog.ConsentParticipantMemoryProposalName,
+            AliCapabilityCatalog.ReconcileParticipantMemoryMutationName,
+            AliCapabilityCatalog.SearchCurrentWebName,
+            AliCapabilityCatalog.ResearchWebName,
+            AliCapabilityCatalog.SearchLocalLibraryName,
+            AliCapabilityCatalog.CreateCalendarEventName
+        }.ToHashSet(StringComparer.Ordinal);
+
     private static readonly IReadOnlySet<string> ExpectedDeliberatelyUnavailableToolNames =
         new[]
         {
@@ -83,7 +106,6 @@ public sealed class AliProductionCompositionIntegrationTests
             AliCapabilityCatalog.ArduinoOpenIdeName,
             AliCapabilityCatalog.ArduinoSearchLibrariesName,
             AliCapabilityCatalog.ArduinoUploadName,
-            AliCapabilityCatalog.CreateCalendarEventName,
             AliCapabilityCatalog.CodingFormatProjectName,
             AliCapabilityCatalog.DotNetArchitectureReportName,
             AliCapabilityCatalog.DotNetCreateProjectName,
@@ -96,12 +118,8 @@ public sealed class AliProductionCompositionIntegrationTests
             AliCapabilityCatalog.DotNetDebugStopName,
             AliCapabilityCatalog.DotNetPerformanceMeasureName,
             AliCapabilityCatalog.DotNetPerformanceTraceName,
-            AliCapabilityCatalog.MutateParticipantMemoryName,
-            AliCapabilityCatalog.ConsentParticipantMemoryProposalName,
-            AliCapabilityCatalog.ReconcileParticipantMemoryMutationName,
             AliCapabilityCatalog.GitBlameName,
             AliCapabilityCatalog.GitHistoryName,
-            AliCapabilityCatalog.ListCurrentUserMemoriesName,
             AliCapabilityCatalog.SetAgentModeName,
             AliCapabilityCatalog.GnuNativeExecuteName,
             AliCapabilityCatalog.GnuNativeInspectName,
@@ -109,12 +127,8 @@ public sealed class AliProductionCompositionIntegrationTests
             AliCapabilityCatalog.RaspberryPiInspectLibrariesName,
             AliCapabilityCatalog.RaspberryPiProbeName,
             AliCapabilityCatalog.RaspberryPiSearchPackagesName,
-            AliCapabilityCatalog.RecallUserMemoryName,
-            AliCapabilityCatalog.ResearchWebName,
             AliCapabilityCatalog.RoslynFormatProjectName,
             AliCapabilityCatalog.RunAgentSkillScriptName,
-            AliCapabilityCatalog.SearchCurrentWebName,
-            AliCapabilityCatalog.SearchLocalLibraryName,
             AliCapabilityCatalog.VisualStudioBuildName,
             AliCapabilityCatalog.VisualStudioInspectName,
             AliCapabilityCatalog.VisualStudioOpenName
@@ -220,6 +234,7 @@ public sealed class AliProductionCompositionIntegrationTests
             effectAdapters.Select(adapter => adapter.ToolName)));
 
         var effectRegistry = new AliExecutionEffectAdapterRegistry(effectAdapters);
+        var durableEffectRegistry = AliProductionDurableEffectAdapters.Create();
         var requiredDurableDescriptors = production.Registry.Descriptors
             .Where(descriptor => descriptor.Tier == CapabilityTier.Task)
             .Where(AliDurablePlanningTurn.RequiresDurableEffectAdapter)
@@ -227,14 +242,21 @@ public sealed class AliProductionCompositionIntegrationTests
         var adapterBackedDescriptors = requiredDurableDescriptors
             .Where(descriptor => effectRegistry.TryResolve(descriptor, out _))
             .ToArray();
-        var deliberatelyUnavailableDescriptors = requiredDurableDescriptors
-            .Where(descriptor => !effectRegistry.TryResolve(descriptor, out _))
+        var durableEffectBackedDescriptors = requiredDurableDescriptors
+            .Where(descriptor => durableEffectRegistry.TryGet(descriptor.ToolName, out _))
             .ToArray();
-        Assert.Equal(90, requiredDurableDescriptors.Length);
+        var deliberatelyUnavailableDescriptors = requiredDurableDescriptors
+            .Where(descriptor => !effectRegistry.TryResolve(descriptor, out _)
+                && !durableEffectRegistry.TryGet(descriptor.ToolName, out _))
+            .ToArray();
+        Assert.Equal(85, requiredDurableDescriptors.Length);
         Assert.Equal(44, adapterBackedDescriptors.Length);
-        Assert.Equal(46, deliberatelyUnavailableDescriptors.Length);
+        Assert.Equal(4, durableEffectBackedDescriptors.Length);
+        Assert.Equal(37, deliberatelyUnavailableDescriptors.Length);
         Assert.True(ExpectedDurableAdapterToolNames.SetEquals(
             adapterBackedDescriptors.Select(descriptor => descriptor.ToolName)));
+        Assert.True(ExpectedDurableEffectAdapterToolNames.SetEquals(
+            durableEffectBackedDescriptors.Select(descriptor => descriptor.ToolName)));
         Assert.True(ExpectedDeliberatelyUnavailableToolNames.SetEquals(
             deliberatelyUnavailableDescriptors.Select(descriptor => descriptor.ToolName)));
 
@@ -267,7 +289,9 @@ public sealed class AliProductionCompositionIntegrationTests
                 readyIncomingMcpToolNames: [],
                 enabledOutgoingMcpToolNames: [],
                 reconcilerRevision: "ali-reconciler-v1:production-composition-test",
-                availableReconcilerIds: effectAdapters.Select(adapter => adapter.ReconcilerId),
+                availableReconcilerIds: effectAdapters
+                    .Select(adapter => adapter.ReconcilerId)
+                    .Concat(durableEffectRegistry.Reconcilers.Select(reconciler => reconciler.ReconcilerId)),
                 enforceReconcilerAvailability: true));
         var planning = new CapabilityResolver().ResolvePlanning(
             production.Registry.Freeze(CapabilityAvailabilitySettings.CreateDefault()),
@@ -306,6 +330,7 @@ public sealed class AliProductionCompositionIntegrationTests
         Assert.Contains(planning.UnavailableDescriptors, item =>
             item.Descriptor.ToolName == AliCapabilityCatalog.CodingFormatProjectName
             && item.Reasons.Any(reason => reason.Code == CapabilityAvailabilityReasonCode.ReconcilerUnavailable));
+        AssertPlanningReady(planning, ExpectedRestoredOrdinaryToolNames);
     }
 
     [Fact]
@@ -376,10 +401,11 @@ public sealed class AliProductionCompositionIntegrationTests
             .ToArray();
         var deliberatelyUnavailableToolNames = requiredDurableDescriptors
             .Select(descriptor => descriptor.ToolName)
-            .Where(toolName => !ExpectedDurableAdapterToolNames.Contains(toolName))
+            .Where(toolName => !ExpectedDurableAdapterToolNames.Contains(toolName)
+                && !ExpectedDurableEffectAdapterToolNames.Contains(toolName))
             .ToHashSet(StringComparer.Ordinal);
-        Assert.Equal(90, requiredDurableDescriptors.Length);
-        Assert.Equal(46, deliberatelyUnavailableToolNames.Count);
+        Assert.Equal(85, requiredDurableDescriptors.Length);
+        Assert.Equal(37, deliberatelyUnavailableToolNames.Count);
         Assert.True(ExpectedDeliberatelyUnavailableToolNames.SetEquals(
             deliberatelyUnavailableToolNames));
         foreach (var toolName in deliberatelyUnavailableToolNames)
@@ -406,6 +432,7 @@ public sealed class AliProductionCompositionIntegrationTests
                     reason => reason.Code == CapabilityAvailabilityReasonCode.ReconcilerUnavailable);
             }
         }
+        AssertPlanningReady(resolution, ExpectedRestoredOrdinaryToolNames);
         Assert.DoesNotContain(
             resolvedToolNames,
             AliProductionCapabilityCatalog.IsRetiredToolName);
@@ -437,6 +464,26 @@ public sealed class AliProductionCompositionIntegrationTests
         Assert.Equal(corruptKey, File.ReadAllBytes(
             Path.Combine(checkpointPath, AliWorkflowCheckpointOwnership.KeyFileName)));
         Assert.Equal(0, client.CallCount);
+    }
+
+    private static void AssertPlanningReady(
+        CapabilityResolutionSnapshot resolution,
+        IEnumerable<string> expectedToolNames)
+    {
+        foreach (var toolName in expectedToolNames.Order(StringComparer.Ordinal))
+        {
+            var unavailable = resolution.UnavailableDescriptors.SingleOrDefault(
+                item => string.Equals(
+                    item.Descriptor.ToolName,
+                    toolName,
+                    StringComparison.Ordinal));
+            var reason = unavailable is null
+                ? $"Tool '{toolName}' was absent from both effective and unavailable production capability partitions."
+                : string.Join(
+                    "; ",
+                    unavailable.Reasons.Select(item => $"{item.Code}: {item.Message}"));
+            Assert.True(resolution.TryGetTool(toolName, out _), reason);
+        }
     }
 
     private sealed class CompositionFixture : IDisposable

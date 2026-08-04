@@ -271,6 +271,7 @@ internal static class AliProductionDurableEffectAdapters
 {
     internal static AliDurableEffectAdapterRegistry Create() => new(
     [
-        new AliParticipantMemoryDurableEffectAdapter()
+        new AliParticipantMemoryDurableEffectAdapter(),
+        new AliCalendarDurableEffectAdapter()
     ]);
 }

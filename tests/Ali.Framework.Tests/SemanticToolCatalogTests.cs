@@ -9,6 +9,88 @@ namespace Ali.Framework.Tests;
 public sealed class SemanticToolCatalogTests
 {
     [Fact]
+    public void CoreAssistant_HealthyCSharpSelectionIsNotReplaced()
+    {
+        var selectedTool = CreateTool(AliCapabilityCatalog.RoslynAnalyzeProjectName);
+        var selection = new SemanticToolSelection(
+            [selectedTool],
+            ["csharp-dotnet"],
+            string.Empty,
+            UsedSemanticIndex: true,
+            Status: "ready");
+
+        var selectedNames = AliAgentHarnessRunner.ResolveCoreToolNames(
+            selection,
+            out var recoverySuiteLoaded);
+
+        Assert.False(recoverySuiteLoaded);
+        Assert.Single(selectedNames);
+        Assert.Contains(AliCapabilityCatalog.RoslynAnalyzeProjectName, selectedNames);
+    }
+
+    [Fact]
+    public void CoreAssistant_HealthyWeatherSelectionIsNotReplaced()
+    {
+        var selection = new SemanticToolSelection(
+            [CreateTool(AliCapabilityCatalog.SearchCurrentWebName)],
+            ["current-information"],
+            string.Empty,
+            UsedSemanticIndex: true,
+            Status: "ready");
+
+        var selectedNames = AliAgentHarnessRunner.ResolveCoreToolNames(
+            selection,
+            out var recoverySuiteLoaded);
+        Assert.False(recoverySuiteLoaded);
+        Assert.Single(selectedNames);
+        Assert.Contains(AliCapabilityCatalog.SearchCurrentWebName, selectedNames);
+    }
+
+    [Fact]
+    public void CoreAssistant_EmptySelectionLoadsOnlyBoundedRecoverySuite()
+    {
+        var selection = new SemanticToolSelection(
+            [],
+            [],
+            string.Empty,
+            UsedSemanticIndex: true,
+            Status: "ready");
+
+        var selectedNames = AliAgentHarnessRunner.ResolveCoreToolNames(
+            selection,
+            out var recoverySuiteLoaded);
+
+        Assert.True(recoverySuiteLoaded);
+        Assert.Equal(7, selectedNames.Count);
+        Assert.Contains(AliCapabilityCatalog.SearchCurrentWebName, selectedNames);
+        Assert.Contains(AliCapabilityCatalog.DotNetCreateProjectName, selectedNames);
+        Assert.DoesNotContain(AliCapabilityCatalog.DotNetRunName, selectedNames);
+    }
+
+    [Fact]
+    public void CoreAssistant_DegradedSelectionLoadsBoundedRecoverySuite()
+    {
+        var selection = new SemanticToolSelection(
+            [CreateTool(AliCapabilityCatalog.RoslynAnalyzeProjectName)],
+            ["csharp-dotnet"],
+            string.Empty,
+            UsedSemanticIndex: false,
+            Status: "semantic index unavailable",
+            RequiresAttention: true);
+
+        var selectedNames = AliAgentHarnessRunner.ResolveCoreToolNames(
+            selection,
+            out var recoverySuiteLoaded);
+
+        Assert.True(recoverySuiteLoaded);
+        Assert.Contains(AliCapabilityCatalog.SearchCurrentWebName, selectedNames);
+        Assert.Contains(AliCapabilityCatalog.DotNetCreateProjectName, selectedNames);
+        Assert.Contains(AliCapabilityCatalog.DotNetBuildName, selectedNames);
+        Assert.Contains(AliCapabilityCatalog.DotNetTestName, selectedNames);
+        Assert.Equal(7, selectedNames.Count);
+    }
+
+    [Fact]
     public void BucketMetadata_CoversEveryKnownLiveToolExactlyOnce()
     {
         var tools = AliCapabilityCatalog.Tools
@@ -33,15 +115,37 @@ public sealed class SemanticToolCatalogTests
             && bucket.Requires is not null
             && bucket.Requires.Contains("programming-core")
             && bucket.Requires.Contains("files"));
-        var personal = Assert.Single(buckets, bucket => bucket.Id == "personal-and-current");
-        Assert.Contains(AliCapabilityCatalog.MutateParticipantMemoryName, personal.ToolNames);
+        var memoryRecall = Assert.Single(buckets, bucket => bucket.Id == "participant-memory");
+        Assert.Contains(AliCapabilityCatalog.RecallUserMemoryName, memoryRecall.ToolNames);
+        var memoryChange = Assert.Single(buckets, bucket => bucket.Id == "participant-memory-change");
+        Assert.Contains(AliCapabilityCatalog.MutateParticipantMemoryName, memoryChange.ToolNames);
         Assert.Contains(
             AliCapabilityCatalog.ConsentParticipantMemoryProposalName,
-            personal.ToolNames);
+            memoryChange.ToolNames);
         Assert.Contains(
             AliCapabilityCatalog.ReconcileParticipantMemoryMutationName,
-            personal.ToolNames);
+            memoryChange.ToolNames);
+        var current = Assert.Single(buckets, bucket => bucket.Id == "current-information");
+        Assert.Contains(AliCapabilityCatalog.SearchCurrentWebName, current.ToolNames);
+        var personalDrawerIds = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "participant-memory",
+            "participant-memory-change",
+            "current-information",
+            "everyday-assistance"
+        };
+        Assert.All(
+            buckets.Where(bucket => personalDrawerIds.Contains(bucket.Id)),
+            bucket => Assert.True(
+                bucket.ToolNames.Count <= SafeSemanticToolFallback.MaximumToolSchemas - 2,
+                $"The '{bucket.Id}' drawer has {bucket.ToolNames.Count} schemas and can be truncated after the two discovery schemas are reserved."));
     }
+
+    private static AIFunctionDeclaration CreateTool(string name) =>
+        AIFunctionFactory.Create(
+            () => name,
+            name,
+            $"Test declaration for {name}.");
 
     [Fact]
     public void ExternalMcpTools_FromTheSameServerStayInOneSemanticDrawer()
@@ -90,6 +194,10 @@ public sealed class SemanticToolCatalogTests
                 "Open a semantic tool drawer."))
             .ToArray();
         var catalog = new RegistryOnlySemanticToolCatalog();
+
+        Assert.Contains(
+            LiveSemanticToolDirectory.CreateBoundedDirectoryBuckets(tools),
+            bucket => bucket.Id == "current-information");
 
         var selection = await catalog.SelectAsync(
             "create an artifact",
@@ -142,6 +250,33 @@ public sealed class SemanticToolCatalogTests
     }
 
     [Fact]
+    public async Task RegistryFallback_CurrentInformationMakesCurrentWebSearchReachableWithinTheBound()
+    {
+        var tools = AliCapabilityCatalog.Tools
+            .Select(capability => (AIFunctionDeclaration)AIFunctionFactory.Create(
+                () => capability.Name,
+                capability.Name,
+                capability.Description))
+            .ToArray();
+        var catalog = new RegistryOnlySemanticToolCatalog();
+
+        var selection = await catalog.SelectAsync(
+            "current-information",
+            tools,
+            [],
+            TestContext.Current.CancellationToken);
+
+        Assert.Contains(selection.Tools, tool => tool.Name == AliCapabilityCatalog.SearchCurrentWebName);
+        Assert.Contains(selection.Tools, tool => tool.Name == AliCapabilityCatalog.ResearchWebName);
+        Assert.Contains(selection.Tools, tool => tool.Name == AliCapabilityCatalog.SearchLocalLibraryName);
+        Assert.Contains(selection.Tools, tool => tool.Name == AliCapabilityCatalog.GetCurrentLocalTimeName);
+        Assert.Contains(selection.Tools, tool => tool.Name == AliCapabilityCatalog.SemanticDiscoverToolsName);
+        Assert.Contains(selection.Tools, tool => tool.Name == AliCapabilityCatalog.ListAvailableToolsName);
+        Assert.InRange(selection.Tools.Count, 1, SafeSemanticToolFallback.MaximumToolSchemas);
+        Assert.Contains("Opened exact groupId 'current-information' mechanically", selection.Status, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task CompactDirectory_ReportsStableEnabledAndDisabledGroupIds()
     {
         var tools = new[]
@@ -162,7 +297,7 @@ public sealed class SemanticToolCatalogTests
             selection.Directory,
             StringComparison.Ordinal);
         Assert.Contains(
-            "groupId=personal-and-current; status=disabled",
+            "groupId=current-information; status=disabled",
             selection.Directory,
             StringComparison.Ordinal);
         Assert.DoesNotContain("groupId=external-coding-agents", selection.Directory, StringComparison.Ordinal);

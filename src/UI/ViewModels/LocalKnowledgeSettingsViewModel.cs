@@ -140,8 +140,9 @@ public sealed class LocalKnowledgeSettingsViewModel : ObservableObject
         IsBusy = true;
         try
         {
-            var settings = BuildSettings();
-            _services.SaveLocalVectorLibrarySettings(settings);
+            var settings = _services
+                .SaveLocalVectorLibrarySettings(BuildSettings())
+                .Settings;
             Directory.CreateDirectory(settings.RootDirectory);
             StatusText = $"Local knowledge settings saved to {SettingsPath}.";
             if (settings.Enabled && settings.UseManagedLocalQdrant && settings.AutoStartQdrant)

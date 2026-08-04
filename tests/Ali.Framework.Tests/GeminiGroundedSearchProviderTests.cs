@@ -13,7 +13,16 @@ public sealed class GeminiGroundedSearchProviderTests
     }
 
     [Fact]
-    public async Task ProviderPinsFlashLiteUsesGroundingMetadataAndNeverPlacesKeyInBody()
+    public void NewInstallSearchesTavilyBeforeGoogleGrounding()
+    {
+        var order = new WebSourceBackendSettings().CurrentSearchProviderOrder;
+
+        Assert.Equal(nameof(InternetSearchProvider.Tavily), order[0]);
+        Assert.Equal(nameof(InternetSearchProvider.GoogleGroundedSearch), order[1]);
+    }
+
+    [Fact]
+    public async Task ProviderUsesConfiguredModelGroundingMetadataAndNeverPlacesKeyInBody()
     {
         const string apiKey = "test-secret-key";
         var handler = new RecordingHandler(GroundedResponse());
@@ -37,7 +46,9 @@ public sealed class GeminiGroundedSearchProviderTests
         Assert.Equal("The supported current fact.", hit.Content);
         Assert.Empty(warnings);
         Assert.Equal(1, handler.CallCount);
-        Assert.Contains("gemini-3.5-flash-lite:generateContent", handler.LastUri?.AbsoluteUri);
+        Assert.Contains(
+            settings.GeminiGroundedSearchModel + ":generateContent",
+            handler.LastUri?.AbsoluteUri);
         Assert.Equal(apiKey, handler.LastApiKey);
         Assert.Contains("\"google_search\":{}", handler.LastBody);
         Assert.Contains("\"thinkingLevel\":\"minimal\"", handler.LastBody);
@@ -50,7 +61,7 @@ public sealed class GeminiGroundedSearchProviderTests
     }
 
     [Fact]
-    public async Task RetrieverUsesGoogleGroundingBeforeLegacyFallbacks()
+    public async Task RetrieverFallsBackToGoogleGroundingWhenDefaultTavilyIsUnavailable()
     {
         var handler = new RecordingHandler(GroundedResponse());
         using var client = new HttpClient(handler);
@@ -73,6 +84,93 @@ public sealed class GeminiGroundedSearchProviderTests
         Assert.Equal("https://example.com/current", excerpt.Url);
         Assert.Contains("The supported current fact.", excerpt.Excerpt);
         Assert.Equal(1, handler.CallCount);
+        Assert.Contains(result.Warnings, warning => warning.Contains("Tavily API key is not configured", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RetrieverUsesTavilyFirstWithoutCallingGoogleGrounding()
+    {
+        var handler = new RecordingHandler(TavilyResponse());
+        using var client = new HttpClient(handler);
+        var settings = Settings("configured-google-key");
+        settings.TavilyApiKey = "configured-tavily-key";
+        var provider = new GeminiGroundedSearchProvider(
+            client,
+            () => settings,
+            new GeminiGroundingUsageLedger(dataRoot: null));
+        var retriever = new TavilyFirecrawlSourceRetriever(
+            client,
+            () => settings,
+            contentExtractor: null,
+            provider);
+
+        var result = await retriever.RetrieveAsync(
+            Plan("current software engineering news"),
+            CancellationToken.None);
+
+        var excerpt = Assert.Single(result.Excerpts);
+        Assert.Equal("https://example.com/weather", excerpt.Url);
+        Assert.Equal(1, handler.CallCount);
+        Assert.Equal(new Uri(settings.TavilyBaseUrl).Host, handler.LastUri?.Host);
+    }
+
+    [Fact]
+    public async Task RetrieverHonorsExplicitGoogleFirstProviderOrder()
+    {
+        var handler = new RecordingHandler(GroundedResponse());
+        using var client = new HttpClient(handler);
+        var settings = Settings("configured-google-key");
+        settings.TavilyApiKey = "configured-tavily-key";
+        settings.CurrentSearchProviderOrder =
+        [
+            nameof(InternetSearchProvider.GoogleGroundedSearch),
+            nameof(InternetSearchProvider.Tavily)
+        ];
+        var provider = new GeminiGroundedSearchProvider(
+            client,
+            () => settings,
+            new GeminiGroundingUsageLedger(dataRoot: null));
+        var retriever = new TavilyFirecrawlSourceRetriever(
+            client,
+            () => settings,
+            contentExtractor: null,
+            provider);
+
+        var result = await retriever.RetrieveAsync(
+            Plan("current software engineering news"),
+            CancellationToken.None);
+
+        Assert.Single(result.Excerpts);
+        Assert.Equal(1, handler.CallCount);
+        Assert.Equal("configured-google-key", handler.LastApiKey);
+    }
+
+    [Fact]
+    public async Task RetrieverHonorsRequestTimeoutAndFallsBackToGoogleGrounding()
+    {
+        var settings = Settings("configured-google-key");
+        settings.TavilyApiKey = "configured-tavily-key";
+        settings.RequestTimeoutSeconds = 1;
+        var handler = new TavilyTimeoutThenGroundingHandler(new Uri(settings.TavilyBaseUrl).Host);
+        using var client = new HttpClient(handler);
+        var provider = new GeminiGroundedSearchProvider(
+            client,
+            () => settings,
+            new GeminiGroundingUsageLedger(dataRoot: null));
+        var retriever = new TavilyFirecrawlSourceRetriever(
+            client,
+            () => settings,
+            contentExtractor: null,
+            provider);
+
+        var result = await retriever.RetrieveAsync(
+            Plan("current software engineering news"),
+            CancellationToken.None);
+
+        Assert.True(handler.TavilyCancellationObserved);
+        Assert.Equal(2, handler.CallCount);
+        Assert.Single(result.Excerpts);
+        Assert.Contains(result.Warnings, warning => warning.Contains("timed out after 1 second", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -235,6 +333,19 @@ public sealed class GeminiGroundedSearchProviderTests
         }
         """;
 
+    private static string TavilyResponse() =>
+        """
+        {
+          "results": [
+            {
+              "title": "Fast current source",
+              "url": "https://example.com/weather",
+              "content": "Current weather evidence from the configured direct search provider."
+            }
+          ]
+        }
+        """;
+
     private sealed class RecordingHandler(
         string responseBody,
         HttpStatusCode statusCode = HttpStatusCode.OK) : HttpMessageHandler
@@ -262,6 +373,42 @@ public sealed class GeminiGroundedSearchProviderTests
             return new HttpResponseMessage(statusCode)
             {
                 Content = new StringContent(responseBody, Encoding.UTF8, "application/json")
+            };
+        }
+    }
+
+    private sealed class TavilyTimeoutThenGroundingHandler(string tavilyHost) : HttpMessageHandler
+    {
+        public int CallCount { get; private set; }
+
+        public bool TavilyCancellationObserved { get; private set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            CallCount++;
+            if (string.Equals(request.RequestUri?.Host, tavilyHost, StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    TavilyCancellationObserved = true;
+                    throw;
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"results\":[]}", Encoding.UTF8, "application/json")
+                };
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(GroundedResponse(), Encoding.UTF8, "application/json")
             };
         }
     }

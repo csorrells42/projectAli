@@ -9,7 +9,22 @@ using Ali.Modules.Runtime;
 
 namespace Ali.Modules.UserMemory;
 
-internal sealed class Mem0ProcessClient : IParticipantMemoryTransport
+/// <summary>
+/// Optional health boundary that gives a private worker one bounded cold start while
+/// preserving the ordinary steady-state deadline after a correlated response proves it ready.
+/// </summary>
+internal interface IParticipantMemoryHealthTransport
+{
+    Task<Mem0Response> SendHealthAsync(
+        object request,
+        TimeSpan steadyStateTimeout,
+        TimeSpan coldStartTimeout,
+        CancellationToken cancellationToken);
+}
+
+internal sealed class Mem0ProcessClient :
+    IParticipantMemoryTransport,
+    IParticipantMemoryHealthTransport
 {
     internal const string LoopbackNoProxy = "127.0.0.1,localhost,::1";
     internal const string DeadProxyUri = "http://127.0.0.1:1";
@@ -32,6 +47,7 @@ internal sealed class Mem0ProcessClient : IParticipantMemoryTransport
     private KillOnCloseProcessJob? _processJob;
     private string? _processConfiguration;
     private string? _processEmbeddingSpaceId;
+    private int _processReady;
     private int _disposed;
 
     public Mem0ProcessClient(
@@ -86,7 +102,49 @@ internal sealed class Mem0ProcessClient : IParticipantMemoryTransport
         get { lock (_stderr) return string.Join(" | ", _stderr); }
     }
 
-    public async Task<Mem0Response> SendAsync(object request, CancellationToken cancellationToken)
+    public Task<Mem0Response> SendAsync(object request, CancellationToken cancellationToken) =>
+        SendCoreAsync(request, healthTimeouts: null, cancellationToken);
+
+    public Task<Mem0Response> SendHealthAsync(
+        object request,
+        TimeSpan steadyStateTimeout,
+        TimeSpan coldStartTimeout,
+        CancellationToken cancellationToken)
+    {
+        _ = SelectHealthRequestTimeout(
+            workerReady: false,
+            steadyStateTimeout,
+            coldStartTimeout);
+        return SendCoreAsync(
+            request,
+            new HealthRequestTimeouts(steadyStateTimeout, coldStartTimeout),
+            cancellationToken);
+    }
+
+    internal static TimeSpan SelectHealthRequestTimeout(
+        bool workerReady,
+        TimeSpan steadyStateTimeout,
+        TimeSpan coldStartTimeout)
+    {
+        if (steadyStateTimeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(steadyStateTimeout),
+                "The steady-state participant-memory health timeout must be positive.");
+        }
+        if (coldStartTimeout < steadyStateTimeout)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(coldStartTimeout),
+                "The participant-memory cold-start timeout cannot be shorter than the steady-state timeout.");
+        }
+        return workerReady ? steadyStateTimeout : coldStartTimeout;
+    }
+
+    private async Task<Mem0Response> SendCoreAsync(
+        object request,
+        HealthRequestTimeouts? healthTimeouts,
+        CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         ArgumentNullException.ThrowIfNull(request);
@@ -115,14 +173,36 @@ internal sealed class Mem0ProcessClient : IParticipantMemoryTransport
                 nameof(request));
         }
 
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        CancellationTokenSource? healthTimeout = null;
+        var laneToken = cancellationToken;
+        if (healthTimeouts is { } configuredTimeouts)
+        {
+            // Readiness is transport-owned and in memory. Budget selection must not reload
+            // settings or probe disk state on every health request.
+            healthTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            healthTimeout.CancelAfter(SelectHealthRequestTimeout(
+                HasReadyWorkerForEmbeddingSpace(expectedEmbeddingSpaceId),
+                configuredTimeouts.SteadyState,
+                configuredTimeouts.ColdStart));
+            laneToken = healthTimeout.Token;
+        }
+
+        try
+        {
+            await _gate.WaitAsync(laneToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            healthTimeout?.Dispose();
+            throw;
+        }
         Process? process = null;
         var workerPipeMayBeDirty = false;
         try
         {
             process = await EnsureStartedAsync(
                     expectedEmbeddingSpaceId,
-                    cancellationToken)
+                    laneToken)
                 .ConfigureAwait(false);
             var embeddingSpaceId = _processEmbeddingSpaceId
                 ?? throw new InvalidOperationException(
@@ -146,9 +226,9 @@ internal sealed class Mem0ProcessClient : IParticipantMemoryTransport
             // Mark the worker dirty before the first cancellable pipe write. A
             // WriteLine/Flush exception cannot prove that zero bytes reached stdin.
             workerPipeMayBeDirty = true;
-            await process.StandardInput.WriteLineAsync(requestJson.AsMemory(), cancellationToken).ConfigureAwait(false);
-            await process.StandardInput.FlushAsync(cancellationToken).ConfigureAwait(false);
-            var line = await process.StandardOutput.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+            await process.StandardInput.WriteLineAsync(requestJson.AsMemory(), laneToken).ConfigureAwait(false);
+            await process.StandardInput.FlushAsync(laneToken).ConfigureAwait(false);
+            var line = await process.StandardOutput.ReadLineAsync(laneToken).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(line))
             {
                 throw new InvalidOperationException(
@@ -170,6 +250,7 @@ internal sealed class Mem0ProcessClient : IParticipantMemoryTransport
                 throw new InvalidOperationException(
                     "Mem0 worker response came from a different embedding space.");
             }
+            Volatile.Write(ref _processReady, 1);
             return response;
         }
         catch
@@ -186,6 +267,28 @@ internal sealed class Mem0ProcessClient : IParticipantMemoryTransport
         finally
         {
             _gate.Release();
+            healthTimeout?.Dispose();
+        }
+    }
+
+    private bool HasReadyWorkerForEmbeddingSpace(string expectedEmbeddingSpaceId)
+    {
+        if (Volatile.Read(ref _processReady) == 0)
+        {
+            return false;
+        }
+        var process = _process;
+        try
+        {
+            return process is { HasExited: false }
+                && string.Equals(
+                    _processEmbeddingSpaceId,
+                    expectedEmbeddingSpaceId,
+                    StringComparison.Ordinal);
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
         }
     }
 
@@ -200,6 +303,7 @@ internal sealed class Mem0ProcessClient : IParticipantMemoryTransport
         _processJob = null;
         _processConfiguration = null;
         _processEmbeddingSpaceId = null;
+        Volatile.Write(ref _processReady, 0);
     }
 
     private async Task<Process> EnsureStartedAsync(
@@ -321,6 +425,7 @@ internal sealed class Mem0ProcessClient : IParticipantMemoryTransport
         _processJob = processJob;
         _processConfiguration = processConfiguration;
         _processEmbeddingSpaceId = embeddingSpace.Id;
+        Volatile.Write(ref _processReady, 0);
         return process;
     }
 
@@ -716,6 +821,7 @@ internal sealed class Mem0ProcessClient : IParticipantMemoryTransport
             _processJob?.Dispose();
             _process = null;
             _processJob = null;
+            Volatile.Write(ref _processReady, 0);
         }
         finally
         {
@@ -730,6 +836,10 @@ internal sealed class Mem0ProcessClient : IParticipantMemoryTransport
     }
 
 }
+
+internal readonly record struct HealthRequestTimeouts(
+    TimeSpan SteadyState,
+    TimeSpan ColdStart);
 
 internal sealed record Mem0EmbeddingProcessConfiguration(
     string Provider,

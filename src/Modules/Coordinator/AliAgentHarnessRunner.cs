@@ -43,13 +43,30 @@ internal sealed class AliAgentHarnessRunner : IDisposable
     // Exact repeated tool/argument plans are stopped by the connector; this high
     // ceiling remains only as a final finite-run safety boundary.
     internal const int MaximumToolIterations = int.MaxValue;
+    private static readonly IReadOnlySet<string> CoreRecoveryCSharpToolNames =
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+            AliCapabilityCatalog.CodingInspectProjectName,
+            AliCapabilityCatalog.DotNetCreateProjectName,
+            AliCapabilityCatalog.RoslynAnalyzeProjectName,
+            AliCapabilityCatalog.RoslynFormatProjectName,
+            AliCapabilityCatalog.DotNetBuildName,
+            AliCapabilityCatalog.DotNetTestName
+        };
+    private static readonly IReadOnlySet<string> CoreRecoveryToolNames =
+        new HashSet<string>(CoreRecoveryCSharpToolNames, StringComparer.Ordinal)
+        {
+            AliCapabilityCatalog.SearchCurrentWebName
+        };
     private readonly IReadOnlyList<AITool> _baseTools;
+    private readonly IReadOnlyList<AITool> _startupAssistantTools;
+    private readonly IReadOnlyList<AITool> _startupPolicyTools;
     private readonly AIFunction _protocolTool;
     private readonly IChatClient _modelClient;
     private readonly AliPlanningStateCoordinator _planningStateCoordinator;
     private readonly ILocalModelRuntime _runtime;
     private readonly AssistantProfile _assistantProfile;
-    private readonly Func<AgentOrchestrationSettings> _orchestrationSettings;
+    private readonly AgentOrchestrationSettings _orchestrationSettings;
     private readonly McpClientManager _mcpClients;
     private readonly AgentToolPermissionStore _toolPermissions;
     private readonly AliWorkstationFileAccess _fileAccess;
@@ -127,7 +144,14 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         {
             _baseTools = catalog.Tools.ToArray();
             _protocolTool = OrchestrationProtocolCapability.CreateInvariantFunction();
-            _orchestrationSettings = orchestrationSettings;
+            _startupAssistantTools = _baseTools
+                .Where(tool => tool is not AIFunctionDeclaration function
+                    || !AliProductionCapabilityCatalog.IsRetiredToolName(function.Name))
+                .ToArray();
+            _startupPolicyTools = _startupAssistantTools
+                .Append(_protocolTool)
+                .ToArray();
+            _orchestrationSettings = orchestrationSettings().Normalize();
             _mcpClients = mcpClients;
             _toolPermissions = toolPermissions;
             _fileAccess = fileAccess;
@@ -176,7 +200,7 @@ internal sealed class AliAgentHarnessRunner : IDisposable
                 }
                 _baseCapabilityRegistry = productionCatalog.Registry;
 
-                var initialTools = BuildPolicyTools(_orchestrationSettings().Normalize())
+                var initialTools = _startupPolicyTools
                     .Concat(_frameworkCapabilityTools)
                     .ToArray();
                 var initialInventory = CapabilityTerminalToolInventory.Create(
@@ -305,23 +329,53 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         ModelProfile profile,
         IReadOnlyList<AITool> tools,
         AgentOrchestrationSettings orchestrationSettings,
-        TerminalCapabilityEnforcementProvider? capabilityEnforcementProvider = null)
+        TerminalCapabilityEnforcementProvider? capabilityEnforcementProvider = null,
+        bool coreAssistantPath = false,
+        bool enableWorkspaceFiles = false,
+        string? boundReasoningEffort = null)
     {
         ArgumentNullException.ThrowIfNull(profile);
-        var skillsRoot = Path.Combine(AppContext.BaseDirectory, "skills");
-        var skillsSource = new AliOutcomeReportingAgentSkillsSource(
-            new AgentFileSkillsSource(skillsRoot),
-            _toolOutcomes);
-        var effectiveCapabilityEnforcement = capabilityEnforcementProvider
-            ?? _capabilityEnforcementProvider;
-        var contextProviders = new List<AIContextProvider>
+        AliOutcomeReportingAgentSkillsSource? skillsSource = null;
+        if (!coreAssistantPath)
         {
-            _workMemory.CreateFrameworkProvider()
-        };
+            var skillsRoot = Path.Combine(AppContext.BaseDirectory, "skills");
+            skillsSource = new AliOutcomeReportingAgentSkillsSource(
+                new AgentFileSkillsSource(skillsRoot),
+                _toolOutcomes);
+        }
+
+        var effectiveCapabilityEnforcement = coreAssistantPath
+            ? null
+            : capabilityEnforcementProvider ?? _capabilityEnforcementProvider;
+        var contextProviders = new List<AIContextProvider>();
+        if (!coreAssistantPath)
+        {
+            contextProviders.Add(_workMemory.CreateFrameworkProvider());
+        }
         if (effectiveCapabilityEnforcement is not null)
         {
             contextProviders.Add(effectiveCapabilityEnforcement);
         }
+        var chatOptions = new ChatOptions
+        {
+            Instructions = coreAssistantPath
+                ? BuildCoreAssistantInstructions(_assistantProfile.AssistantName)
+                : AliToolCatalog.BuildInstructions(
+                    _assistantProfile.AssistantName,
+                    orchestrationSettings),
+            Tools = tools.ToList(),
+            ToolMode = ChatToolMode.Auto,
+            AllowMultipleToolCalls = false,
+            MaxOutputTokens = profile.OutputTokenLimit
+        };
+        if (!string.IsNullOrWhiteSpace(boundReasoningEffort))
+        {
+            chatOptions.AdditionalProperties = new AdditionalPropertiesDictionary
+            {
+                [AliInternalModelRoutingProperties.BoundReasoningEffort] = boundReasoningEffort
+            };
+        }
+
         AIAgent agent = planningClient.AsHarnessAgent(new HarnessAgentOptions
         {
             Name = _assistantProfile.AssistantName,
@@ -336,38 +390,33 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             // provider explicitly prevents Harness from adding a random working folder
             // whose setup mutation would sit outside the exact durable tool-call grant.
             DisableFileMemory = true,
-            DisableAgentSkillsProvider = false,
+            DisableAgentSkillsProvider = coreAssistantPath,
             AgentSkillsSource = skillsSource,
-            DisableOpenTelemetry = false,
+            DisableOpenTelemetry = coreAssistantPath,
             OpenTelemetrySourceName = "ProjectAli.AgentFramework",
             // Ali already exposes live progress through CoordinatorTurnContext and keeps
             // private multi-step state in scoped file memory. Harness todo lists made the
             // model narrate an internal plan on ordinary turns and repeatedly surfaced an
             // unfinished list, so keep that overlapping provider out of the conversation.
             DisableTodoProvider = true,
-            FileAccessStore = _fileAccess.FrameworkStore,
-            FileAccessProviderOptions = new FileAccessProviderOptions
-            {
-                Instructions = _fileAccess.Instructions,
-                DisableWriteTools = false,
-                DisableReadOnlyToolApproval = false,
-                DisableWriteToolApproval = false
-            },
+            FileAccessStore = !coreAssistantPath || enableWorkspaceFiles
+                ? _fileAccess.FrameworkStore
+                : null,
+            FileAccessProviderOptions = !coreAssistantPath || enableWorkspaceFiles
+                ? new FileAccessProviderOptions
+                {
+                    Instructions = _fileAccess.Instructions,
+                    DisableWriteTools = false,
+                    DisableReadOnlyToolApproval = coreAssistantPath,
+                    DisableWriteToolApproval = coreAssistantPath
+                }
+                : null,
             ToolApprovalAgentOptions = new ToolApprovalAgentOptions
             {
                 AutoApprovalRules = [ShouldAutoApproveAndRecordAsync]
             },
             AIContextProviders = contextProviders,
-            ChatOptions = new ChatOptions
-            {
-                Instructions = AliToolCatalog.BuildInstructions(
-                    _assistantProfile.AssistantName,
-                    orchestrationSettings),
-                Tools = tools.ToList(),
-                ToolMode = ChatToolMode.Auto,
-                AllowMultipleToolCalls = false,
-                MaxOutputTokens = profile.OutputTokenLimit
-            }
+            ChatOptions = chatOptions
         });
         agent = AliFrameworkProviderOutcomeMiddleware.WithOutcomeReporting(
             agent,
@@ -376,6 +425,17 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             skillsSource);
         return AliAgentFrameworkMiddleware.WithVisibleLifecycle(agent, _turnAccessor, "Ali");
     }
+
+    private static string BuildCoreAssistantInstructions(string assistantName) =>
+        $"You are {assistantName}, a truthful, reliable, fast personal and coding assistant. "
+        + "Answer ordinary conversation directly and concisely. "
+        + "When the request needs current, personal, stored, local, or tool-produced facts, call the relevant available tool and answer from its result; never invent evidence or falsely claim that a capability is unavailable. "
+        + "Preserve every place name and geographic qualifier exactly when forming search arguments, including state and country abbreviations. "
+        + "Inspect every tool result, propagate errors truthfully, and keep using appropriate tools until the request is complete or the returned evidence proves it is impossible. "
+        + "Before answering, account for every explicitly requested operation and report each operation's verified success, failure, or exact unresolved obstacle. "
+        + "Never pause merely because a tool or protocol response is imperfect; recover, choose another available tool, ask one necessary clarification, or explain the exact obstacle. "
+        + "File operations must remain inside the approved workspace exposed by the file tools. "
+        + AliToolCatalog.TypoInterpretationInstruction;
 
     private CapabilityRuntimeStateSnapshot CaptureCapabilityRuntimeState(string dataRoot)
     {
@@ -639,16 +699,6 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             $"Withheld {issues.Count} external declaration(s) without affecting valid tools. {string.Join("; ", categories)}. {string.Join(" ", examples)}");
     }
 
-    private IReadOnlyList<AITool> BuildPolicyTools(AgentOrchestrationSettings settings)
-    {
-        ArgumentNullException.ThrowIfNull(settings);
-        return _baseTools
-            .Where(tool => tool is not AIFunctionDeclaration function
-                || !AliProductionCapabilityCatalog.IsRetiredToolName(function.Name))
-            .Append(_protocolTool)
-            .ToArray();
-    }
-
     public bool ResolveToolApproval(AgentToolApprovalDecision decision) =>
         _pendingApprovals.TryGetValue(decision.RequestId, out var pending)
         && pending.Completion.TrySetResult(decision.Choice);
@@ -671,14 +721,12 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         EnterRun();
         try
         {
-            return await RunCoreAsync(
+            return await RunCoreAssistantAsync(
                     turn,
                     userText,
                     history,
                     attachments,
                     publishFinal,
-                    resumeRequest: null,
-                    structuredRecoveryRequest: null,
                     cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -781,6 +829,199 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         }
     }
 
+    private async Task<AgentHarnessRunResult> RunCoreAssistantAsync(
+        CoordinatorTurnContext turn,
+        string userText,
+        IReadOnlyList<RuntimeChatMessage> history,
+        IReadOnlyList<ChatAttachment> attachments,
+        Func<FinalAnswerPublication, CancellationToken,
+            ValueTask<FinalAnswerPublicationAcknowledgment>> publishFinal,
+        CancellationToken cancellationToken)
+    {
+        var input = BuildInitialInput(history, userText, attachments).ToList();
+        var availableDeclarations = _startupAssistantTools
+            .OfType<AIFunctionDeclaration>()
+            .Where(tool => CoreRecoveryToolNames.Contains(tool.Name))
+            .ToArray();
+        var semanticSelection = await _semanticToolCatalog.SelectAsync(
+                userText,
+                availableDeclarations,
+                [AliCapabilityCatalog.SearchCurrentWebName],
+                cancellationToken)
+            .ConfigureAwait(false);
+        turn.Report(
+            semanticSelection.RequiresAttention
+                ? AgentActivityKind.Warning
+                : AgentActivityKind.Status,
+            semanticSelection.RequiresAttention
+                ? "Core tool selection degraded"
+                : "Core tools ready",
+            semanticSelection.Status
+            + " Loaded: "
+            + (semanticSelection.Tools.Count == 0
+                ? "none"
+                : string.Join(", ", semanticSelection.Tools.Select(tool => tool.Name))));
+        var selectedNames = ResolveCoreToolNames(semanticSelection, out var recoverySuiteLoaded);
+        if (recoverySuiteLoaded)
+        {
+            turn.Report(
+                AgentActivityKind.Warning,
+                "Core recovery tools ready",
+                "Semantic selection was degraded or supplied no usable core tool. "
+                + "Ali retained that selection and loaded the bounded Workspace C# recovery suite: "
+                + string.Join(", ", CoreRecoveryToolNames.Order(StringComparer.Ordinal)));
+        }
+
+        var activeTools = _startupAssistantTools
+            .Where(tool => tool is AIFunctionDeclaration function
+                && selectedNames.Contains(function.Name))
+            .Select(tool => tool is CapabilityPermissionProjectionAIFunction permissionProjection
+                ? (AITool)permissionProjection.ProjectWithoutApproval()
+                : tool)
+            .ToArray();
+        var enableWorkspaceFiles = selectedNames.Overlaps(CoreRecoveryCSharpToolNames);
+        var dispatch = CaptureBoundModelDispatch();
+        var activeAgent = CreateAgent(
+            dispatch.ChatClient,
+            dispatch.Profile,
+            activeTools,
+            _orchestrationSettings,
+            capabilityEnforcementProvider: null,
+            coreAssistantPath: true,
+            enableWorkspaceFiles: enableWorkspaceFiles,
+            boundReasoningEffort: dispatch.GenerationSettingsBinding.ReasoningEffort);
+        var session = await activeAgent.CreateSessionAsync(cancellationToken).ConfigureAwait(false);
+        string? finishReason = null;
+        var renderedAnswer = new StringBuilder();
+        var pendingShadowCalls = new PendingShadowCallTracker();
+        var pendingStandingPermissions = new PendingStandingPermissionTracker();
+        using var coreExecutionScope = AliCoreAssistantExecutionContext.Enter();
+
+        try
+        {
+            while (true)
+            {
+                ToolApprovalRequestContent? approvalRequest = null;
+                await foreach (var update in activeAgent.RunStreamingAsync(
+                                   input,
+                                   session,
+                                   options: null,
+                                   cancellationToken).ConfigureAwait(false))
+                {
+                    finishReason = update.FinishReason?.ToString() ?? finishReason;
+                    foreach (var content in update.Contents)
+                    {
+                        switch (content)
+                        {
+                            case ToolApprovalRequestContent approval:
+                                TrackPendingShadowCall(turn, pendingShadowCalls, approval.ToolCall);
+                                approvalRequest = approval;
+                                break;
+                            case FunctionCallContent functionCall when !functionCall.InformationalOnly:
+                                TrackPendingShadowCall(turn, pendingShadowCalls, functionCall);
+                                var displayName = ResolveUserFacingToolName(
+                                    activeTools,
+                                    functionCall.Name);
+                                turn.Report(
+                                    AgentActivityKind.ToolCall,
+                                    $"Using {displayName}",
+                                    $"Ali selected {displayName}.");
+                                break;
+                            case FunctionResultContent functionResult:
+                                CompleteStandingPermission(
+                                    turn,
+                                    pendingStandingPermissions,
+                                    functionResult);
+                                TryObserveFrameworkResult(
+                                    _shadowObserver,
+                                    turn,
+                                    pendingShadowCalls,
+                                    functionResult);
+                                if (ShouldReportGenericReturnedResult(functionResult))
+                                {
+                                    turn.Report(
+                                        AgentActivityKind.ToolResult,
+                                        "Tool returned",
+                                        "Ali is evaluating the returned evidence.");
+                                }
+                                break;
+                            case TextContent textContent when textContent.Text is { Length: > 0 }:
+                                renderedAnswer.Append(textContent.Text);
+                                break;
+                        }
+                    }
+                }
+
+                if (approvalRequest is null)
+                {
+                    break;
+                }
+
+                var response = await RequestApprovalAsync(
+                    turn,
+                    approvalRequest,
+                    activeTools,
+                    pendingStandingPermissions,
+                    cancellationToken).ConfigureAwait(false);
+                input = [new MeaiChatMessage(MeaiChatRole.User, [response])];
+            }
+
+            var modelAnswer = renderedAnswer.ToString();
+            if (string.IsNullOrWhiteSpace(modelAnswer))
+            {
+                throw new InvalidOperationException(
+                    "The model returned no answer and no further tool action.");
+            }
+            var exactAnswer = FinalAnswerRenderer.Compose(
+                modelAnswer,
+                turn.WebSources);
+
+            finishReason = ChatFinishReason.Stop.ToString();
+            var publication = new FinalAnswerPublication(
+                turn.ConversationId,
+                turn.UserMessageId,
+                turn.AssistantMessageId,
+                "publication_" + turn.AssistantMessageId,
+                exactAnswer,
+                TurnStateIntegrity.Digest(exactAnswer),
+                turn.UsedEvidenceTool ? EvidenceStatus.Verified : EvidenceStatus.Unverified,
+                finishReason);
+            var acknowledgment = await publishFinal(publication, cancellationToken)
+                .ConfigureAwait(false);
+            FinalAnswerPublicationBoundary.RequireExactInMemoryAcknowledgment(
+                publication,
+                acknowledgment);
+
+            return new AgentHarnessRunResult(
+                WroteAnswer: true,
+                FinishReason: finishReason,
+                Paused: false,
+                ResumeIdentity: null);
+        }
+        finally
+        {
+            pendingStandingPermissions.Clear();
+        }
+    }
+
+    internal static IReadOnlySet<string> ResolveCoreToolNames(
+        SemanticToolSelection semanticSelection,
+        out bool recoverySuiteLoaded)
+    {
+        ArgumentNullException.ThrowIfNull(semanticSelection);
+        var selectedNames = semanticSelection.Tools
+            .Select(tool => tool.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        recoverySuiteLoaded = semanticSelection.RequiresAttention
+            || selectedNames.Count == 0;
+        if (recoverySuiteLoaded)
+        {
+            selectedNames.UnionWith(CoreRecoveryToolNames);
+        }
+
+        return selectedNames;
+    }
+
     private async Task<AgentHarnessRunResult> RunCoreAsync(
         CoordinatorTurnContext turn,
         string userText,
@@ -798,27 +1039,14 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             ? userSelection.SelectedUser
             : null;
         using var workMemoryScope = _workMemory.EnterScope(turn.ConversationId, workMemoryUser);
-        var configuredIncomingMcpToolCount = _mcpClients.CountEnabledConfiguredToolPolicies();
-        if (configuredIncomingMcpToolCount > 0)
-        {
-            turn.Report(
-                AgentActivityKind.Status,
-                "Connecting configured MCP tools",
-                $"Checking {configuredIncomingMcpToolCount} enabled external tool configuration(s) and their exact saved policies within a fixed {McpClientManager.DefaultTurnSetupBudget.TotalSeconds:0}-second setup budget for this turn.");
-        }
-        await using var mcpSession = await _mcpClients
-            .CreateEnabledToolSessionAsync(cancellationToken)
-            .ConfigureAwait(false);
-        foreach (var warning in mcpSession.Warnings)
-        {
-            turn.Report(
-                AgentActivityKind.Warning,
-                $"Incoming MCP warning: {warning.ServerName}",
-                warning.Message);
-        }
+        // External MCP discovery is optional and must never delay the core assistant path.
+        // It will return as an explicitly activated background feature after the core gate passes.
+        await using var mcpSession = McpToolSession.Empty(
+            "core-assistant-mcp-bypassed-v1",
+            static () => "core-assistant-mcp-bypassed-v1");
 
-        var orchestrationSettings = _orchestrationSettings().Normalize();
-        IReadOnlyList<AITool> activeTools = BuildPolicyTools(orchestrationSettings);
+        var orchestrationSettings = _orchestrationSettings;
+        IReadOnlyList<AITool> activeTools = _startupPolicyTools;
         var activeCapabilityRegistry = _baseCapabilityRegistry;
         var capabilityEnforcementProvider = _baseCapabilityRegistry is not null
             && _capabilitySettings is not null
@@ -1024,10 +1252,6 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             CaptureBoundModelDispatch,
             dispatchBindingsFactory,
             durableTurn.AuthorizeCompletionDispatchAsync);
-        var completionCritic = new AliCompletionCritic(
-            CaptureBoundModelDispatch,
-            dispatchBindingsFactory,
-            durableTurn.AuthorizeCompletionDispatchAsync);
         using var planningClient = new AliOrchestrationPlanningClient(
             _modelClient,
             () => _runtime.ActiveProfile.SupportsToolCalls,
@@ -1041,7 +1265,7 @@ internal sealed class AliAgentHarnessRunner : IDisposable
                 FinalAnswerRenderer.Compose(answer, activeTurn.WebSources),
             boundDispatchAccessor: CaptureBoundModelDispatch,
             dispatchBindingsFactory: dispatchBindingsFactory,
-            completionCritic: completionCritic);
+            completionCritic: null);
         using var planningTurnScope = planningClient.BeginTurn(
             turn,
             durableTurn.Input,

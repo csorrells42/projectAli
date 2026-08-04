@@ -8,11 +8,23 @@ public sealed class WebSourceBackendSettings
 {
     public bool Enabled { get; set; } = true;
 
+    public List<string> CurrentSearchProviderOrder { get; set; } =
+    [
+        nameof(InternetSearchProvider.Tavily),
+        nameof(InternetSearchProvider.GoogleGroundedSearch),
+        nameof(InternetSearchProvider.Firecrawl),
+        nameof(InternetSearchProvider.BraveSearch),
+        nameof(InternetSearchProvider.Serper)
+    ];
+
     public bool GeminiGroundedSearchEnabled { get; set; } = true;
 
     public string GeminiApiKeyEnvironmentVariable { get; set; } = "GEMINI_API_KEY";
 
     public string? GeminiApiKey { get; set; }
+
+    public string GeminiBaseUrl { get; set; } =
+        "https://generativelanguage.googleapis.com/v1beta/models/";
 
     public string GeminiGroundedSearchModel { get; set; } = "gemini-3.5-flash-lite";
 

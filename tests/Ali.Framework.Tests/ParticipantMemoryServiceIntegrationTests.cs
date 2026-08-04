@@ -596,6 +596,80 @@ public sealed class ParticipantMemoryServiceIntegrationTests
     }
 
     [Fact]
+    public async Task Health_UsesColdStartBudgetThenReturnsToSteadyStateBudget()
+    {
+        var receipts = new ParticipantMemoryReceiptAuthority();
+        var roster = Roster();
+        var permission = receipts.IssuePermission(
+            "alice",
+            ["Read"],
+            "call-budgeted-health",
+            "test",
+            DateTimeOffset.UtcNow,
+            TimeSpan.FromMinutes(1));
+        var authority = new ParticipantMemoryAuthorityContext("alice", null, [])
+        {
+            Permission = permission
+        };
+        var transport = new BudgetedHealthTransport(Space, roster.Revision);
+        var settings = new UserMemorySettings
+        {
+            HealthTimeoutMilliseconds = 250,
+            ColdStartHealthTimeoutMilliseconds = 1200
+        }.Normalize();
+        await using var service = new Mem0UserMemoryService(
+            transport,
+            () => settings,
+            receipts,
+            new MutableRosterAuthority());
+
+        var cold = await service.CheckParticipantHealthAsync(
+            roster,
+            authority,
+            TestContext.Current.CancellationToken);
+        var warm = await service.CheckParticipantHealthAsync(
+            roster,
+            authority,
+            TestContext.Current.CancellationToken);
+
+        Assert.Null(cold.Failure);
+        Assert.True(cold.EmbeddingAvailable);
+        Assert.True(cold.Mem0Available);
+        Assert.True(cold.QdrantAvailable);
+        Assert.Equal(ParticipantMemoryFailureCode.TimedOut, warm.Failure?.Code);
+        Assert.Equal(
+            new[] { TimeSpan.FromMilliseconds(1200), TimeSpan.FromMilliseconds(250) },
+            transport.AppliedTimeouts);
+        Assert.Equal(2, transport.HealthCalls);
+        Assert.Equal(0, transport.OrdinarySendCalls);
+    }
+
+    [Fact]
+    public void HealthTimeoutSelection_UsesStartupAllowanceOnlyUntilWorkerIsReady()
+    {
+        var steady = TimeSpan.FromSeconds(3);
+        var cold = TimeSpan.FromSeconds(15);
+
+        Assert.Equal(
+            cold,
+            Mem0ProcessClient.SelectHealthRequestTimeout(
+                workerReady: false,
+                steady,
+                cold));
+        Assert.Equal(
+            steady,
+            Mem0ProcessClient.SelectHealthRequestTimeout(
+                workerReady: true,
+                steady,
+                cold));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            Mem0ProcessClient.SelectHealthRequestTimeout(
+                workerReady: false,
+                steady,
+                TimeSpan.FromSeconds(2)));
+    }
+
+    [Fact]
     public async Task LegacyActiveUserMethods_NeverEnterParticipantTransport()
     {
         var transport = new ScriptedTransport(
@@ -853,5 +927,74 @@ public sealed class ParticipantMemoryServiceIntegrationTests
             options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
             return options;
         }
+    }
+
+    private sealed class BudgetedHealthTransport(
+        Mem0EmbeddingSpaceConfiguration space,
+        string rosterRevision) :
+        IParticipantMemoryTransport,
+        IParticipantMemoryHealthTransport
+    {
+        private bool _workerReady;
+
+        public string DataRoot => space.DataRoot;
+
+        public int HealthCalls { get; private set; }
+
+        public int OrdinarySendCalls { get; private set; }
+
+        public List<TimeSpan> AppliedTimeouts { get; } = [];
+
+        public ValueTask<Mem0EmbeddingSpaceConfiguration> ResolveCurrentEmbeddingSpaceAsync(
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult(space);
+        }
+
+        public Task<Mem0Response> SendAsync(
+            object request,
+            CancellationToken cancellationToken)
+        {
+            OrdinarySendCalls++;
+            throw new InvalidOperationException(
+                "Participant health must use the cold-start-aware transport boundary.");
+        }
+
+        public async Task<Mem0Response> SendHealthAsync(
+            object request,
+            TimeSpan steadyStateTimeout,
+            TimeSpan coldStartTimeout,
+            CancellationToken cancellationToken)
+        {
+            HealthCalls++;
+            var applied = Mem0ProcessClient.SelectHealthRequestTimeout(
+                _workerReady,
+                steadyStateTimeout,
+                coldStartTimeout);
+            AppliedTimeouts.Add(applied);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(applied);
+            if (_workerReady)
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, timeout.Token);
+            }
+            _workerReady = true;
+            return new Mem0Response(
+                "worker-health",
+                true,
+                "ready",
+                null,
+                0,
+                null,
+                EmbeddingSpaceId: space.Id,
+                RosterRevision: rosterRevision,
+                ParticipantMemories: [],
+                EmbeddingAvailable: true,
+                Mem0Available: true,
+                QdrantAvailable: true);
+        }
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }

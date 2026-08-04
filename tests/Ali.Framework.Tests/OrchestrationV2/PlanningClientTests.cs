@@ -224,7 +224,7 @@ public sealed class PlanningClientTests
         """;
         var inner = new ScriptedChatClient(
             Compatibility(PlanningContractTests.DecisionJson(
-                "{\"kind\":\"expandTools\",\"need\":\"files\"}")),
+                ExpandToolsJson(tool))),
             Compatibility(updateDecision));
         var observer = new RecordingTransitionObserver(
             authoritativeWorkGraph: activated.Snapshot);
@@ -378,7 +378,7 @@ public sealed class PlanningClientTests
         var tool = ReadFileTool();
         var inner = new ScriptedChatClient(
             Compatibility(PlanningContractTests.DecisionJson(
-                "{\"kind\":\"expandTools\",\"need\":\"Read the requested file\"}")),
+                ExpandToolsJson(tool))),
             Compatibility(PlanningContractTests.ToolDecisionJson(
                 "read_file", "path", "README.md")));
         var semantic = new RecordingSemanticCatalog([tool]);
@@ -400,9 +400,14 @@ public sealed class PlanningClientTests
         Assert.Equal("read_file", call.Name);
         Assert.Equal(1, semantic.SelectCount);
         Assert.Equal(2, inner.Requests.Count);
-        var transportSchema = AliOrchestrationProtocol.BuildTransportSchema().GetRawText();
-        Assert.Equal(transportSchema, SchemaText(inner.Requests[0]));
-        Assert.Equal(transportSchema, SchemaText(inner.Requests[1]));
+        var expandableTransportSchema = AliOrchestrationProtocol
+            .BuildTransportSchema([ExpandableGroupId(tool)])
+            .GetRawText();
+        var exhaustedTransportSchema = AliOrchestrationProtocol
+            .BuildTransportSchema([])
+            .GetRawText();
+        Assert.Equal(expandableTransportSchema, SchemaText(inner.Requests[0]));
+        Assert.Equal(exhaustedTransportSchema, SchemaText(inner.Requests[1]));
         Assert.DoesNotContain(
             "\"toolName\":\"read_file\"",
             MessageText(inner.Requests[0]),
@@ -443,7 +448,7 @@ public sealed class PlanningClientTests
         var request = Assert.Single(inner.Requests);
         var text = string.Join("\n", request.Messages.Select(message => message.Text));
         Assert.Contains("groupId=files; status=enabled", text, StringComparison.Ordinal);
-        Assert.Contains("copy exactly one enabled groupId token", text, StringComparison.Ordinal);
+        Assert.Contains("expandableGroupIds array", text, StringComparison.Ordinal);
         Assert.DoesNotContain($"{tool.Name}: {tool.Description}", text, StringComparison.Ordinal);
     }
 
@@ -453,9 +458,9 @@ public sealed class PlanningClientTests
         var tool = ReadFileTool();
         var inner = new ScriptedChatClient(
             Compatibility(PlanningContractTests.DecisionJson(
-                "{\"kind\":\"expandTools\",\"need\":\"files\"}")),
+                ExpandToolsJson(tool))),
             Compatibility(PlanningContractTests.DecisionJson(
-                "{\"kind\":\"expandTools\",\"need\":\"files\"}")));
+                ExpandToolsJson(tool))));
         var semantic = new RecordingSemanticCatalog([]);
         var observer = new RecordingTransitionObserver();
         using var client = new AliOrchestrationPlanningClient(
@@ -724,7 +729,7 @@ public sealed class PlanningClientTests
         var tool = ReadFileTool();
         var inner = new ScriptedChatClient(
             Compatibility(PlanningContractTests.DecisionJson(
-                "{\"kind\":\"expandTools\",\"need\":\"Read the requested file\"}")),
+                ExpandToolsJson(tool))),
             Compatibility(PlanningContractTests.ToolDecisionJson(
                 "read_file", "path_alias", "README.md")));
         var client = new AliOrchestrationPlanningClient(
@@ -760,7 +765,7 @@ public sealed class PlanningClientTests
         var tool = ReadFileTool();
         var inner = new ScriptedChatClient(
             Compatibility(PlanningContractTests.DecisionJson(
-                "{\"kind\":\"expandTools\",\"need\":\"Read the requested file\"}")),
+                ExpandToolsJson(tool))),
             Compatibility(PlanningContractTests.ToolDecisionJson(
                 "read_file", "path", "README.md")),
             Compatibility(PlanningContractTests.DecisionJson(
@@ -807,7 +812,7 @@ public sealed class PlanningClientTests
         var tool = ReadFileTool();
         var inner = new ScriptedChatClient(
             Compatibility(PlanningContractTests.DecisionJson(
-                "{\"kind\":\"expandTools\",\"need\":\"Read the requested file\"}")),
+                ExpandToolsJson(tool))),
             Compatibility(PlanningContractTests.ToolDecisionJson(
                 "read_file", "path", "README.md")),
             Compatibility(PlanningContractTests.DecisionJson(
@@ -866,7 +871,7 @@ public sealed class PlanningClientTests
         var tool = ReadFileTool();
         var inner = new ScriptedChatClient(
             Compatibility(PlanningContractTests.DecisionJson(
-                "{\"kind\":\"expandTools\",\"need\":\"Read the requested file\"}")),
+                ExpandToolsJson(tool))),
             Compatibility(PlanningContractTests.ToolDecisionJson(
                 "read_file", "path", "README.md")),
             Compatibility(PlanningContractTests.DecisionJson(
@@ -916,7 +921,7 @@ public sealed class PlanningClientTests
         var tool = ReadFileTool();
         var inner = new ScriptedChatClient(
             Compatibility(PlanningContractTests.DecisionJson(
-                "{\"kind\":\"expandTools\",\"need\":\"Read the requested file\"}")),
+                ExpandToolsJson(tool))),
             Compatibility(PlanningContractTests.ToolDecisionJson(
                 "read_file", "path", "README.md")),
             Compatibility(PlanningContractTests.DecisionJson(
@@ -974,7 +979,7 @@ public sealed class PlanningClientTests
         var tool = ReadFileTool();
         var inner = new ScriptedChatClient(
             Compatibility(PlanningContractTests.DecisionJson(
-                "{\"kind\":\"expandTools\",\"need\":\"Read the requested file\"}")),
+                ExpandToolsJson(tool))),
             Compatibility(PlanningContractTests.ToolDecisionJson(
                 "read_file", "path", "README.md")),
             Compatibility(PlanningContractTests.DecisionJson(
@@ -1042,6 +1047,23 @@ public sealed class PlanningClientTests
         (string path) => path,
         "read_file",
         "Read a file by exact path.");
+
+    private static string ExpandToolsJson(AIFunctionDeclaration tool)
+    {
+        return JsonSerializer.Serialize(new
+        {
+            kind = "expandTools",
+            need = ExpandableGroupId(tool)
+        });
+    }
+
+    private static string ExpandableGroupId(AIFunctionDeclaration tool)
+    {
+        var bucket = Assert.Single(
+            LiveSemanticToolDirectory.CreateBoundedDirectoryBuckets([tool]),
+            candidate => candidate.ToolNames.Contains(tool.Name, StringComparer.Ordinal));
+        return bucket.Id;
+    }
 
     private static AliPlanningTurnInput Input() => new(
         0,

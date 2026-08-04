@@ -31,6 +31,19 @@ internal sealed record PlanningWorkGraphConsumerDiagnostics(
 /// </summary>
 internal sealed class AliOrchestrationPlanningClient : IChatClient
 {
+    private static readonly IReadOnlySet<string> CoreHotPathToolNames =
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+            AliCapabilityCatalog.SearchCurrentWebName,
+            AliCapabilityCatalog.GetCurrentLocalTimeName,
+            AliCapabilityCatalog.GetActiveUserProfileName,
+            AliCapabilityCatalog.RecallUserMemoryName,
+            AliCapabilityCatalog.ListCurrentUserMemoriesName,
+            AliCapabilityCatalog.MutateParticipantMemoryName,
+            AliCapabilityCatalog.ConsentParticipantMemoryProposalName,
+            AliCapabilityCatalog.ReconcileParticipantMemoryMutationName
+        };
+
     private readonly IChatClient _inner;
     private readonly Func<bool> _supportsNativeToolCalls;
     private readonly Func<ModelProfile> _modelProfileAccessor;
@@ -149,6 +162,8 @@ internal sealed class AliOrchestrationPlanningClient : IChatClient
             var active = CurrentTurn();
             var liveTools = SnapshotTaskTools(options);
             active.SetLiveTools(liveTools);
+            var boundedDirectoryBuckets = LiveSemanticToolDirectory
+                .CreateBoundedDirectoryBuckets(liveTools);
             await ObserveCorrelatedToolResultsAsync(
                 active,
                 frameworkMessages,
@@ -213,13 +228,28 @@ internal sealed class AliOrchestrationPlanningClient : IChatClient
 
                 var useNative = allowNativeProtocol && dispatch.SupportsNativeToolCalls;
                 var selectedTools = active.SelectedTools();
-                var protocol = AliOrchestrationProtocol.CreateDeclaration(selectedTools);
+                var selectedToolNames = selectedTools
+                    .Select(static tool => tool.Name)
+                    .ToHashSet(StringComparer.Ordinal);
+                var expandableToolGroupIds = boundedDirectoryBuckets
+                    .Where(bucket => bucket.ToolNames.Count > 0
+                        && bucket.ToolNames.Any(toolName => !selectedToolNames.Contains(toolName)))
+                    .Select(static bucket => bucket.Id)
+                    .Distinct(StringComparer.Ordinal)
+                    .Order(StringComparer.Ordinal)
+                    .ToArray();
+                var expandableToolGroupIdSet = expandableToolGroupIds
+                    .ToHashSet(StringComparer.Ordinal);
+                var protocol = AliOrchestrationProtocol.CreateDeclaration(
+                    selectedTools,
+                    expandableToolGroupIds);
                 var projectedInput = _contextProjector.Project(
                     dispatch.Profile,
                     active.ImmutableOriginalRequest,
                     active.SnapshotInput(),
                     active.CapabilityDirectory,
                     selectedTools,
+                    expandableToolGroupIds,
                     active.AttachmentProjection,
                     protocol);
                 var planningMessages = projectedInput.Messages;
@@ -341,6 +371,13 @@ internal sealed class AliOrchestrationPlanningClient : IChatClient
                 var validation = _validator.Validate(
                     decision,
                     active.ValidationContext(selectedTools, resolvedEvidence));
+                if (decision.NextAction is ExpandToolsAction requestedExpansion
+                    && !expandableToolGroupIdSet.Contains(requestedExpansion.Need))
+                {
+                    validation = new OrchestrationDecisionValidationResult(
+                        validation.Errors.Append(
+                            "ExpandTools.need must equal one currently expandable groupId token from the authoritative capability directory."));
+                }
                 if (!validation.IsValid)
                 {
                     // Rebuild the same authoritative projection. Do not append the rejected draft
@@ -386,6 +423,7 @@ internal sealed class AliOrchestrationPlanningClient : IChatClient
                         liveTools,
                         active.RetainedToolNames(),
                         cancellationToken).ConfigureAwait(false);
+                    ReportToolExpansion(active.Turn, expand.Need, selection.Status);
                     active.ApplySelection(selection);
                     var selectionChanged = !string.Equals(
                         beforeSelection,
@@ -1330,6 +1368,38 @@ internal sealed class AliOrchestrationPlanningClient : IChatClient
         }
     }
 
+    private static void ReportToolExpansion(
+        CoordinatorTurnContext turn,
+        string requestedGroupId,
+        string selectionStatus)
+    {
+        var exactGroupId = requestedGroupId.ReplaceLineEndings(" ").Trim();
+        if (exactGroupId.Length > 120)
+        {
+            exactGroupId = exactGroupId[..120] + "...";
+        }
+
+        var visibleGroupName = string.Join(
+            " ",
+            exactGroupId.Split(['-', '_'], StringSplitOptions.RemoveEmptyEntries));
+        if (string.IsNullOrWhiteSpace(visibleGroupName))
+        {
+            visibleGroupName = "selected capability drawer";
+        }
+
+        try
+        {
+            turn.Report(
+                AgentActivityKind.Status,
+                $"Opening tools: {visibleGroupName}",
+                AliPlanningProjectionSafety.BoundAndRedactText(selectionStatus));
+        }
+        catch
+        {
+            // Presentation is non-authoritative and must not prevent a selected drawer from opening.
+        }
+    }
+
     private static string ResolveUserFacingToolName(AIFunctionDeclaration tool)
     {
         try
@@ -1605,6 +1675,7 @@ internal sealed class AliOrchestrationPlanningClient : IChatClient
                 }
 
                 _selectedToolNames.RemoveWhere(name => !_liveTools.ContainsKey(name));
+                RetainCoreHotPathTools();
                 if (inventoryChanged)
                 {
                     CapabilityDirectory = LiveSemanticToolDirectory.BuildBoundedDirectoryFor(tools);
@@ -1771,9 +1842,22 @@ internal sealed class AliOrchestrationPlanningClient : IChatClient
                     }
                 }
 
+                RetainCoreHotPathTools();
+
                 CapabilityDirectory = string.IsNullOrWhiteSpace(selection.Directory)
                     ? LiveSemanticToolDirectory.BuildBoundedDirectoryFor(_liveTools.Values.ToArray())
                     : selection.Directory;
+            }
+        }
+
+        private void RetainCoreHotPathTools()
+        {
+            foreach (var name in CoreHotPathToolNames)
+            {
+                if (_liveTools.ContainsKey(name))
+                {
+                    _selectedToolNames.Add(name);
+                }
             }
         }
 

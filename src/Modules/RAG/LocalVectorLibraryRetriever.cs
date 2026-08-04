@@ -41,12 +41,14 @@ public sealed class LocalVectorLibraryRetriever : ISourceRetriever
     private readonly string _dataRoot;
     private readonly string _scanStatePath;
     private readonly string _embeddingSpaceMarkerPath;
+    private readonly HttpClient _httpClient;
     private readonly OpenAiCompatibleEmbeddingClient _embeddingClient;
     private readonly LocalVectorLibrarySettings _settings;
+    private readonly Func<LocalVectorLibrarySettings>? _settingsProvider;
     private readonly QdrantServiceManager _qdrant;
     private readonly IDocumentChunker _chunker;
     private readonly RipgrepSearchService _ripgrep;
-    private readonly SemaphoreSlim _scanGate = new(1, 1);
+    private readonly SemaphoreSlim _scanGate;
 
     public LocalVectorLibraryRetriever(
         string dataRoot,
@@ -55,19 +57,59 @@ public sealed class LocalVectorLibraryRetriever : ISourceRetriever
         QdrantServiceManager? qdrant = null,
         IDocumentChunker? chunker = null,
         RipgrepSearchService? ripgrep = null)
+        : this(dataRoot, httpClient, settings, qdrant, chunker, ripgrep, scanGate: null)
+    {
+    }
+
+    private LocalVectorLibraryRetriever(
+        string dataRoot,
+        HttpClient httpClient,
+        LocalVectorLibrarySettings? settings,
+        QdrantServiceManager? qdrant,
+        IDocumentChunker? chunker,
+        RipgrepSearchService? ripgrep,
+        SemaphoreSlim? scanGate)
     {
         _dataRoot = dataRoot;
         _scanStatePath = LocalVectorLibrarySettingsStore.GetScanStatePath(dataRoot);
         _embeddingSpaceMarkerPath = LocalVectorLibrarySettingsStore.GetEmbeddingSpaceMarkerPath(dataRoot);
+        _httpClient = httpClient;
         _embeddingClient = new OpenAiCompatibleEmbeddingClient(httpClient);
         _settings = settings ?? LocalVectorLibrarySettingsStore.LoadOrDefault(dataRoot);
+        _settingsProvider = null;
         _qdrant = qdrant ?? new QdrantServiceManager(dataRoot);
         _chunker = chunker ?? new StructuredDocumentChunker();
         _ripgrep = ripgrep ?? new RipgrepSearchService();
+        _scanGate = scanGate ?? new SemaphoreSlim(1, 1);
+    }
+
+    public LocalVectorLibraryRetriever(
+        string dataRoot,
+        HttpClient httpClient,
+        LocalVectorLibrarySettingsSnapshotOwner settingsOwner,
+        QdrantServiceManager? qdrant = null,
+        IDocumentChunker? chunker = null,
+        RipgrepSearchService? ripgrep = null)
+        : this(
+            dataRoot,
+            httpClient,
+            CaptureSettings(settingsOwner),
+            qdrant,
+            chunker,
+            ripgrep)
+    {
+        _settingsProvider = () => settingsOwner.Capture().Settings;
     }
 
     public void WriteExample()
     {
+        var operation = BindCurrentSettings();
+        if (!ReferenceEquals(operation, this))
+        {
+            operation.WriteExample();
+            return;
+        }
+
         try
         {
             LocalVectorLibrarySettingsStore.WriteExample(_dataRoot);
@@ -88,6 +130,12 @@ public sealed class LocalVectorLibraryRetriever : ISourceRetriever
 
     public async Task<SourceRetrievalResult> RetrieveAsync(SourceQueryPlan plan, CancellationToken cancellationToken)
     {
+        var operation = BindCurrentSettings();
+        if (!ReferenceEquals(operation, this))
+        {
+            return await operation.RetrieveAsync(plan, cancellationToken).ConfigureAwait(false);
+        }
+
         if (!_settings.Enabled || !ShouldAttempt(plan))
         {
             return SourceRetrievalResult.Empty;
@@ -221,6 +269,12 @@ public sealed class LocalVectorLibraryRetriever : ISourceRetriever
 
     public async Task<LocalKnowledgeStatus> ScanAsync(bool force, CancellationToken cancellationToken = default)
     {
+        var operation = BindCurrentSettings();
+        if (!ReferenceEquals(operation, this))
+        {
+            return await operation.ScanAsync(force, cancellationToken).ConfigureAwait(false);
+        }
+
         var warnings = new List<string>();
         if (!TryGetEmbeddingConfiguration(out _, out var configurationFailure))
         {
@@ -247,6 +301,12 @@ public sealed class LocalVectorLibraryRetriever : ISourceRetriever
 
     public async Task<LocalKnowledgeStatus> GetStatusAsync(CancellationToken cancellationToken = default)
     {
+        var operation = BindCurrentSettings();
+        if (!ReferenceEquals(operation, this))
+        {
+            return await operation.GetStatusAsync(cancellationToken).ConfigureAwait(false);
+        }
+
         var state = LoadScanState();
         if (!TryGetEmbeddingConfiguration(out _, out var configurationFailure))
         {
@@ -325,6 +385,13 @@ public sealed class LocalVectorLibraryRetriever : ISourceRetriever
 
     public async Task RebuildAsync(CancellationToken cancellationToken = default)
     {
+        var operation = BindCurrentSettings();
+        if (!ReferenceEquals(operation, this))
+        {
+            await operation.RebuildAsync(cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         if (!TryGetEmbeddingConfiguration(out _, out var configurationFailure))
         {
             throw new InvalidOperationException(
@@ -768,6 +835,30 @@ public sealed class LocalVectorLibraryRetriever : ISourceRetriever
 
     private bool IsAllowedFile(string path) => _settings.AllowedExtensions.Any(
         allowed => string.Equals(allowed, Path.GetExtension(path), StringComparison.OrdinalIgnoreCase));
+
+    private LocalVectorLibraryRetriever BindCurrentSettings()
+    {
+        if (_settingsProvider is null)
+        {
+            return this;
+        }
+
+        return new LocalVectorLibraryRetriever(
+            _dataRoot,
+            _httpClient,
+            _settingsProvider(),
+            _qdrant,
+            _chunker,
+            _ripgrep,
+            _scanGate);
+    }
+
+    private static LocalVectorLibrarySettings CaptureSettings(
+        LocalVectorLibrarySettingsSnapshotOwner settingsOwner)
+    {
+        ArgumentNullException.ThrowIfNull(settingsOwner);
+        return settingsOwner.Capture().Settings;
+    }
 
     private ScanState LoadScanState()
     {

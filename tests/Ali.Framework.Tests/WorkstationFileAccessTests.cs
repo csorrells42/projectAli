@@ -11,6 +11,34 @@ namespace Ali.Framework.Tests;
 public sealed class WorkstationFileAccessTests
 {
     [Fact]
+    public async Task CoreAssistant_FileAuditJournalIsSkipped()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "AliCoreFileAuditTests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var audit = new AgentFileActionAuditStore(root, activeUsers: null);
+            using (AliCoreAssistantExecutionContext.Enter())
+            {
+                await audit.AppendAsync(
+                    "write",
+                    "Workspace/Program.cs",
+                    succeeded: true,
+                    "completed",
+                    TestContext.Current.CancellationToken);
+            }
+
+            Assert.False(File.Exists(audit.Path));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public void CapabilityCatalog_MatchesEveryFrameworkFileToolName()
     {
         var expected = new[]
@@ -414,9 +442,9 @@ public sealed class WorkstationFileAccessTests
             var error = await Assert.ThrowsAsync<ArgumentException>(() =>
                 access.Store.WriteAsync("touch.txt", "test", TestContext.Current.CancellationToken));
 
-            Assert.Contains("Desktop/touch.txt", error.Message, StringComparison.Ordinal);
+            Assert.Contains("Workspace/touch.txt", error.Message, StringComparison.Ordinal);
             Assert.Contains("do not ask the user for an absolute path", error.Message, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("Desktop/touch.txt", access.Instructions, StringComparison.Ordinal);
+            Assert.Contains("Workspace/", access.Instructions, StringComparison.Ordinal);
         });
     }
 

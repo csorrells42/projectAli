@@ -6,7 +6,8 @@ namespace Ali.Modules.Coordinator;
 internal enum FinalAnswerPublicationDisposition
 {
     Rejected = 0,
-    PersistedByConversationStore = 1
+    DisplayedInMemory = 1,
+    PersistedByConversationStore = 2
 }
 
 internal sealed record FinalAnswerPublication(
@@ -25,6 +26,14 @@ internal sealed record FinalAnswerPublicationAcknowledgment(
     string AnswerDigest,
     FinalAnswerPublicationDisposition Disposition)
 {
+    internal static FinalAnswerPublicationAcknowledgment Displayed(
+        FinalAnswerPublication publication) =>
+        new(
+            publication.PublicationId,
+            publication.AssistantMessageId,
+            publication.AnswerDigest,
+            FinalAnswerPublicationDisposition.DisplayedInMemory);
+
     internal static FinalAnswerPublicationAcknowledgment Accepted(
         FinalAnswerPublication publication) =>
         new(
@@ -76,6 +85,30 @@ internal static class FinalAnswerPublicationBoundary
         FinalAnswerPublication publication,
         FinalAnswerPublicationAcknowledgment? acknowledgment)
     {
+        RequireExactAcknowledgment(
+            publication,
+            acknowledgment,
+            FinalAnswerPublicationDisposition.PersistedByConversationStore,
+            "The conversation store did not persist the exact final publication.");
+    }
+
+    internal static void RequireExactInMemoryAcknowledgment(
+        FinalAnswerPublication publication,
+        FinalAnswerPublicationAcknowledgment? acknowledgment)
+    {
+        RequireExactAcknowledgment(
+            publication,
+            acknowledgment,
+            FinalAnswerPublicationDisposition.DisplayedInMemory,
+            "The live conversation sink did not display the exact final publication.");
+    }
+
+    private static void RequireExactAcknowledgment(
+        FinalAnswerPublication publication,
+        FinalAnswerPublicationAcknowledgment? acknowledgment,
+        FinalAnswerPublicationDisposition requiredDisposition,
+        string rejectionMessage)
+    {
         ArgumentNullException.ThrowIfNull(publication);
         if (acknowledgment is null)
         {
@@ -83,11 +116,9 @@ internal static class FinalAnswerPublicationBoundary
                 "The conversation stream returned no final-publication acknowledgment.");
         }
 
-        if (acknowledgment.Disposition
-            != FinalAnswerPublicationDisposition.PersistedByConversationStore)
+        if (acknowledgment.Disposition != requiredDisposition)
         {
-            throw new InvalidOperationException(
-                "The conversation store did not persist the exact final publication.");
+            throw new InvalidOperationException(rejectionMessage);
         }
 
         if (!string.Equals(
@@ -112,29 +143,71 @@ internal static class FinalAnswerPublicationBoundary
 /// <summary>
 /// One-shot handoff from the producer to the desktop conversation sink. Channel admission is
 /// intentionally not an acknowledgment: the sink completes this delivery only after the exact
-/// assistant message has been applied and the conversation store has returned successfully.
+/// assistant message has reached the required live-display or durable-persistence boundary.
 /// </summary>
 internal sealed class FinalAnswerPublicationDelivery
 {
     private readonly TaskCompletionSource<FinalAnswerPublicationAcknowledgment> _completion =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly FinalAnswerPublicationDisposition _requiredDisposition;
 
-    internal FinalAnswerPublicationDelivery(FinalAnswerPublication publication)
+    internal FinalAnswerPublicationDelivery(
+        FinalAnswerPublication publication,
+        FinalAnswerPublicationDisposition requiredDisposition =
+            FinalAnswerPublicationDisposition.PersistedByConversationStore)
     {
         Publication = publication ?? throw new ArgumentNullException(nameof(publication));
+        if (requiredDisposition is not FinalAnswerPublicationDisposition.DisplayedInMemory
+            and not FinalAnswerPublicationDisposition.PersistedByConversationStore)
+        {
+            throw new ArgumentOutOfRangeException(nameof(requiredDisposition));
+        }
+
+        _requiredDisposition = requiredDisposition;
     }
 
     internal FinalAnswerPublication Publication { get; }
+
+    internal bool RequiresPersistence =>
+        _requiredDisposition == FinalAnswerPublicationDisposition.PersistedByConversationStore;
 
     internal async ValueTask<FinalAnswerPublicationAcknowledgment> WaitAsync(
         CancellationToken cancellationToken) =>
         await _completion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
 
+    internal void AcknowledgeDisplayed(
+        string conversationId,
+        string assistantMessageId,
+        string exactAnswerText) =>
+        Acknowledge(
+            conversationId,
+            assistantMessageId,
+            exactAnswerText,
+            FinalAnswerPublicationDisposition.DisplayedInMemory);
+
     internal void AcknowledgePersisted(
         string conversationId,
         string assistantMessageId,
-        string exactAnswerText)
+        string exactAnswerText) =>
+        Acknowledge(
+            conversationId,
+            assistantMessageId,
+            exactAnswerText,
+            FinalAnswerPublicationDisposition.PersistedByConversationStore);
+
+    private void Acknowledge(
+        string conversationId,
+        string assistantMessageId,
+        string exactAnswerText,
+        FinalAnswerPublicationDisposition disposition)
     {
+        if (disposition != _requiredDisposition)
+        {
+            _completion.TrySetException(new InvalidOperationException(
+                "The conversation sink used the wrong final-publication acknowledgment boundary."));
+            return;
+        }
+
         if (!string.Equals(conversationId, Publication.ConversationId, StringComparison.Ordinal)
             || !string.Equals(
                 assistantMessageId,
@@ -151,7 +224,10 @@ internal sealed class FinalAnswerPublicationDelivery
             return;
         }
 
-        _completion.TrySetResult(FinalAnswerPublicationAcknowledgment.Accepted(Publication));
+        _completion.TrySetResult(
+            disposition == FinalAnswerPublicationDisposition.DisplayedInMemory
+                ? FinalAnswerPublicationAcknowledgment.Displayed(Publication)
+                : FinalAnswerPublicationAcknowledgment.Accepted(Publication));
     }
 
     internal void Reject(string reason)

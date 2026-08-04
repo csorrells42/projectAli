@@ -358,9 +358,9 @@ public sealed class AliCodingModule : IAsyncDisposable
         AIFunctionFactory.Create(
             (Func<string, string, CancellationToken, Task<DotNetCreateProjectResult>>)ExecuteDotNetCreateAsync,
             AliCapabilityCatalog.DotNetCreateProjectName,
-            "Create a new C# project scaffold in an empty approved folder. projectPath must be a virtual .csproj path such as Desktop/TicTacToe/TicTacToe.csproj; template must be wpf or console. After success, write the complete requested source before building."),
+            "Create a new C# project scaffold in an empty approved folder. projectPath must be a virtual .csproj path such as Workspace/TicTacToe/TicTacToe.csproj; template must be wpf or console. After success, write the complete requested source before building."),
         AIFunctionFactory.Create(
-            (Func<string, CancellationToken, Task<RoslynAnalysisResult>>)Queries.AnalyzeAsync,
+            (Func<string, CancellationToken, Task<RoslynAnalysisResult>>)Tools.AnalyzeAsync,
             AliCapabilityCatalog.RoslynAnalyzeProjectName,
             "Load an approved C# project with Roslyn and return semantic compiler diagnostics with exact source locations."),
         AIFunctionFactory.Create(
@@ -368,27 +368,27 @@ public sealed class AliCodingModule : IAsyncDisposable
             AliCapabilityCatalog.RoslynFormatProjectName,
             "Format every C# document in an approved project with Roslyn."),
         AIFunctionFactory.Create(
-            (Func<string, string, CancellationToken, Task<RoslynSymbolResult>>)Queries.FindSymbolAsync,
+            (Func<string, string, CancellationToken, Task<RoslynSymbolResult>>)Tools.FindSymbolAsync,
             AliCapabilityCatalog.RoslynFindSymbolName,
             "Find C# type or member declarations semantically with Roslyn."),
         AIFunctionFactory.Create(
-            (Func<string, string, int, int, CancellationToken, Task<RoslynCompletionResult>>)Queries.GetCompletionsAsync,
+            (Func<string, string, int, int, CancellationToken, Task<RoslynCompletionResult>>)Tools.GetCompletionsAsync,
             AliCapabilityCatalog.RoslynGetCompletionsName,
             "Return Roslyn IntelliSense completion candidates at a one-based C# source position."),
         AIFunctionFactory.Create(
-            (Func<string, CancellationToken, Task<RoslynSolutionOverviewResult>>)Queries.InspectSolutionAsync,
+            (Func<string, CancellationToken, Task<RoslynSolutionOverviewResult>>)Tools.InspectSolutionAsync,
             AliCapabilityCatalog.RoslynInspectSolutionName,
             "Inspect an approved .csproj, .sln, or .slnx and return its C# project graph, references, target frameworks, and document counts."),
         AIFunctionFactory.Create(
-            (Func<string, string, CancellationToken, Task<RoslynDocumentResult>>)Queries.InspectDocumentAsync,
+            (Func<string, string, CancellationToken, Task<RoslynDocumentResult>>)Tools.InspectDocumentAsync,
             AliCapabilityCatalog.RoslynInspectDocumentName,
             "Return Roslyn's semantic outline, live diagnostics, and classified source spans for one C# document."),
         AIFunctionFactory.Create(
-            (Func<string, string, int, int, CancellationToken, Task<RoslynPositionResult>>)Queries.InspectPositionAsync,
+            (Func<string, string, int, int, CancellationToken, Task<RoslynPositionResult>>)Tools.InspectPositionAsync,
             AliCapabilityCatalog.RoslynInspectPositionName,
             "Return Roslyn hover text, definitions, and invocation signatures at a one-based C# source position."),
         AIFunctionFactory.Create(
-            (Func<string, string, int, int, CancellationToken, Task<RoslynReferenceResult>>)Queries.FindReferencesAsync,
+            (Func<string, string, int, int, CancellationToken, Task<RoslynReferenceResult>>)Tools.FindReferencesAsync,
             AliCapabilityCatalog.RoslynFindReferencesName,
             "Find every semantic reference to the C# symbol at a one-based source position across a project or solution."),
         AIFunctionFactory.Create(
@@ -555,73 +555,91 @@ public sealed class AliCodingModule : IAsyncDisposable
         string projectPath,
         string template,
         CancellationToken cancellationToken) =>
-        CodingExecution.ExecuteDotNetCreateAsync(
-            projectPath,
-            template,
-            token => ProjectScaffolder.CreateAsync(projectPath, template, token),
-            cancellationToken);
+        AliCoreAssistantExecutionContext.IsActive
+            ? ProjectScaffolder.CreateAsync(projectPath, template, cancellationToken)
+            : CodingExecution.ExecuteDotNetCreateAsync(
+                projectPath,
+                template,
+                token => ProjectScaffolder.CreateAsync(projectPath, template, token),
+                cancellationToken);
 
     private Task<RoslynFormatResult> ExecuteRoslynFormatAsync(
         string projectPath,
         CancellationToken cancellationToken) =>
-        CodingExecution.ExecuteRoslynFormatAsync(
-            projectPath,
-            token => Tools.FormatAsync(projectPath, token),
-            cancellationToken);
+        AliCoreAssistantExecutionContext.IsActive
+            ? Tools.FormatAsync(projectPath, cancellationToken)
+            : CodingExecution.ExecuteRoslynFormatAsync(
+                projectPath,
+                token => Tools.FormatAsync(projectPath, token),
+                cancellationToken);
 
     private Task<DotNetBuildResult> ExecuteDotNetBuildAsync(
         string projectPath,
         string? configuration,
         CancellationToken cancellationToken) =>
-        CodingExecution.ExecuteDotNetBuildAsync(
-            projectPath,
-            configuration,
-            token => Tools.BuildAsync(projectPath, configuration, token),
-            cancellationToken);
+        AliCoreAssistantExecutionContext.IsActive
+            ? Tools.BuildAsync(projectPath, configuration, cancellationToken)
+            : CodingExecution.ExecuteDotNetBuildAsync(
+                projectPath,
+                configuration,
+                token => Tools.BuildAsync(projectPath, configuration, token),
+                cancellationToken);
 
     private Task<DotNetRunResult> ExecuteDotNetRunAsync(
         string projectPath,
         string? configuration,
         CancellationToken cancellationToken) =>
-        CodingExecution.ExecuteDotNetRunAsync(
-            projectPath,
-            configuration,
-            token => Tools.RunAsync(projectPath, configuration, token),
-            cancellationToken);
+        AliCoreAssistantExecutionContext.IsActive
+            ? Tools.RunAsync(projectPath, configuration, cancellationToken)
+            : CodingExecution.ExecuteDotNetRunAsync(
+                projectPath,
+                configuration,
+                token => Tools.RunAsync(projectPath, configuration, token),
+                cancellationToken);
 
     private Task<DotNetStopProjectResult> ExecuteDotNetStopAsync(
         string projectPath,
         string? configuration,
         CancellationToken cancellationToken) =>
-        CodingExecution.ExecuteDotNetStopAsync(
-            projectPath,
-            configuration,
-            token => Tools.StopProjectAsync(projectPath, configuration, token),
-            cancellationToken);
+        AliCoreAssistantExecutionContext.IsActive
+            ? Tools.StopProjectAsync(projectPath, configuration, cancellationToken)
+            : CodingExecution.ExecuteDotNetStopAsync(
+                projectPath,
+                configuration,
+                token => Tools.StopProjectAsync(projectPath, configuration, token),
+                cancellationToken);
 
     private Task<DotNetTestResult> ExecuteDotNetTestAsync(
         string targetPath,
         string? configuration,
         CancellationToken cancellationToken) =>
-        CodingExecution.ExecuteDotNetTestAsync(
-            targetPath,
-            configuration,
-            token => EngineeringLoop.TestAsync(targetPath, configuration, token),
-            cancellationToken);
+        AliCoreAssistantExecutionContext.IsActive
+            ? EngineeringLoop.TestAsync(targetPath, configuration, cancellationToken)
+            : CodingExecution.ExecuteDotNetTestAsync(
+                targetPath,
+                configuration,
+                token => EngineeringLoop.TestAsync(targetPath, configuration, token),
+                cancellationToken);
 
     private Task<DotNetVerificationResult> VerifyAsync(
         string targetPath,
         string? configuration,
         CancellationToken cancellationToken) =>
-        CodingExecution.ExecuteDotNetVerifyAsync(
-            targetPath,
-            configuration,
-            token => EngineeringLoop.VerifyAsync(
+        AliCoreAssistantExecutionContext.IsActive
+            ? EngineeringLoop.VerifyAsync(
                 targetPath,
                 configuration,
                 Tools.BuildAsync,
-                token),
-            cancellationToken);
+                cancellationToken)
+            : CodingExecution.ExecuteDotNetVerifyAsync(
+                targetPath,
+                configuration,
+                token => EngineeringLoop.VerifyAsync(
+                    targetPath,
+                    configuration,
+                    Tools.BuildAsync,
+                    token),
+                cancellationToken);
 
     private Task<DependencyInspectionResult> ExecuteDependencyInspectAsync(
         string projectPath,

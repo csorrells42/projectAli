@@ -51,6 +51,21 @@ public sealed class FinalAnswerPublicationBoundaryTests
     }
 
     [Fact]
+    public void ExactInMemoryDisplayAcknowledgment_IsAcceptedOnlyAtTheLiveBoundary()
+    {
+        var publication = Publication();
+        var acknowledgment = FinalAnswerPublicationAcknowledgment.Displayed(publication);
+
+        FinalAnswerPublicationBoundary.RequireExactInMemoryAcknowledgment(
+            publication,
+            acknowledgment);
+        Assert.Throws<InvalidOperationException>(() =>
+            FinalAnswerPublicationBoundary.RequireExactAcknowledgment(
+                publication,
+                acknowledgment));
+    }
+
+    [Fact]
     public void RejectedConversationStoreAcknowledgment_FailsClosed()
     {
         var publication = Publication();
@@ -107,6 +122,27 @@ public sealed class FinalAnswerPublicationBoundaryTests
 
         var acknowledgment = await waiting;
         FinalAnswerPublicationBoundary.RequireExactAcknowledgment(publication, acknowledgment);
+    }
+
+    [Fact]
+    public async Task LiveDelivery_WaitsUntilTheExactConversationMessageIsDisplayed()
+    {
+        var publication = Publication();
+        var delivery = new FinalAnswerPublicationDelivery(
+            publication,
+            FinalAnswerPublicationDisposition.DisplayedInMemory);
+        var waiting = delivery.WaitAsync(TestContext.Current.CancellationToken).AsTask();
+
+        Assert.False(waiting.IsCompleted);
+        delivery.AcknowledgeDisplayed(
+            publication.ConversationId,
+            publication.AssistantMessageId,
+            publication.AnswerText);
+
+        var acknowledgment = await waiting;
+        FinalAnswerPublicationBoundary.RequireExactInMemoryAcknowledgment(
+            publication,
+            acknowledgment);
     }
 
     [Fact]

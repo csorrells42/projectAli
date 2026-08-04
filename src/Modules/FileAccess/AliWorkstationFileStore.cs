@@ -457,9 +457,12 @@ public sealed class AliWorkstationFileStore : AgentFileStore
 
         if (!_mounts.TryGetValue(segments[0], out var mount))
         {
+            var exampleMount = _mounts.ContainsKey("Workspace")
+                ? "Workspace"
+                : _mounts.Keys.Order(StringComparer.Ordinal).First();
             throw new ArgumentException(
                 $"Unknown workstation mount '{segments[0]}'. Retry with a virtual path beginning with one of: "
-                + $"{string.Join(", ", _mounts.Keys)}. For example, use Desktop/touch.txt for a file on the desktop; "
+                + $"{string.Join(", ", _mounts.Keys)}. For example, use {exampleMount}/touch.txt; "
                 + "do not ask the user for an absolute path.",
                 nameof(path));
         }

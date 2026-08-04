@@ -41,6 +41,11 @@ public sealed class AgentFileActionAuditStore
         string outcome,
         CancellationToken cancellationToken = default)
     {
+        if (AliCoreAssistantExecutionContext.IsActive)
+        {
+            return;
+        }
+
         var userId = _activeUsers is null || _activeUsers.RequiresSelection
             ? "unselected"
             : _activeUsers.Current.StableId;

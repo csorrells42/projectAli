@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Ali.Modules.Coding.Execution;
+using Ali.Modules.Coordinator;
 using Ali.Modules.WorkstationFiles;
 
 namespace Ali.Modules.Coding;
@@ -236,6 +237,11 @@ internal sealed class AliDotNetProjectScaffolder
         string detail,
         CancellationToken cancellationToken)
     {
+        if (AliCoreAssistantExecutionContext.IsActive)
+        {
+            return;
+        }
+
         var entry = JsonSerializer.Serialize(new
         {
             timestampUtc = DateTimeOffset.UtcNow,

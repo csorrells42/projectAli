@@ -110,9 +110,17 @@ public static class AliProductionCapabilityCatalog
         AliCapabilityCatalog.RoslynApplyActionName,
         AliCapabilityCatalog.DotNetDependencyApplyName);
 
-    private static readonly IReadOnlySet<string> ExplicitlyNonIdempotentToolNames = ToolSet(
+    private static readonly IReadOnlySet<string> SafeTargetDomainReadToolNames = ToolSet(
         AliCapabilityCatalog.SearchCurrentWebName,
-        AliCapabilityCatalog.ResearchWebName);
+        AliCapabilityCatalog.ResearchWebName,
+        AliCapabilityCatalog.SearchLocalLibraryName,
+        AliCapabilityCatalog.RecallUserMemoryName,
+        AliCapabilityCatalog.ListCurrentUserMemoriesName);
+
+    private static readonly IReadOnlySet<string> ParticipantMemoryMutationToolNames = ToolSet(
+        AliCapabilityCatalog.MutateParticipantMemoryName,
+        AliCapabilityCatalog.ConsentParticipantMemoryProposalName,
+        AliCapabilityCatalog.ReconcileParticipantMemoryMutationName);
 
     private static readonly IReadOnlySet<string> MsBuildWorkspaceReadOrPreviewToolNames = ToolSet(
         AliCapabilityCatalog.RoslynAnalyzeProjectName,
@@ -540,7 +548,10 @@ public static class AliProductionCapabilityCatalog
     private static CapabilityEffectDescriptor CreateEffect(string toolName, string groupId)
     {
         McpPolicies.TryGetValue(toolName, out var mcpPolicy);
-        var kind = DestructiveToolNames.Contains(toolName)
+        var safeTargetDomainRead = SafeTargetDomainReadToolNames.Contains(toolName);
+        var kind = safeTargetDomainRead
+            ? CapabilityEffectKind.ExternalRead
+            : DestructiveToolNames.Contains(toolName)
             ? CapabilityEffectKind.Destructive
             : ExternalMutationToolNames.Contains(toolName)
                 ? CapabilityEffectKind.ExternalMutation
@@ -574,36 +585,50 @@ public static class AliProductionCapabilityCatalog
             || AdditionalLocalReadingToolNames.Contains(toolName)
             || MsBuildWorkspaceToolNames.Contains(toolName)
             || ProjectControlledExecutionToolNames.Contains(toolName);
-        var writesLocalData = mcpPolicy?.WritesLocalData == true
-            || kind is CapabilityEffectKind.LocalMutation
-                or CapabilityEffectKind.SourceMutation
-                or CapabilityEffectKind.Destructive
-            || AdditionalLocalWritingToolNames.Contains(toolName)
-            || MsBuildWorkspaceToolNames.Contains(toolName)
-            || ProjectControlledExecutionToolNames.Contains(toolName);
+        var writesLocalData = !safeTargetDomainRead
+            && (mcpPolicy?.WritesLocalData == true
+                || kind is CapabilityEffectKind.LocalMutation
+                    or CapabilityEffectKind.SourceMutation
+                    or CapabilityEffectKind.Destructive
+                || AdditionalLocalWritingToolNames.Contains(toolName)
+                || MsBuildWorkspaceToolNames.Contains(toolName)
+                || ProjectControlledExecutionToolNames.Contains(toolName));
         var usesNetwork = mcpPolicy?.UsesNetwork == true
             || kind is CapabilityEffectKind.ExternalRead or CapabilityEffectKind.ExternalMutation
             || AdditionalNetworkUsingToolNames.Contains(toolName)
             || MsBuildWorkspaceToolNames.Contains(toolName)
             || ProjectControlledExecutionToolNames.Contains(toolName);
-        var startsProcesses = kind == CapabilityEffectKind.ProcessControl
-            || AdditionalProcessStartingToolNames.Contains(toolName)
-            || MsBuildWorkspaceToolNames.Contains(toolName)
-            || ProjectControlledExecutionToolNames.Contains(toolName);
+        var startsProcesses = !safeTargetDomainRead
+            && (kind == CapabilityEffectKind.ProcessControl
+                || AdditionalProcessStartingToolNames.Contains(toolName)
+                || MsBuildWorkspaceToolNames.Contains(toolName)
+                || ProjectControlledExecutionToolNames.Contains(toolName));
+
+        var reconcilerId = ParticipantMemoryMutationToolNames.Contains(toolName)
+            ? AliParticipantMemoryDurableEffectAdapter.ParticipantMemoryReconcilerId
+            : string.Equals(
+                toolName,
+                AliCapabilityCatalog.CreateCalendarEventName,
+                StringComparison.Ordinal)
+                ? AliCalendarDurableEffectAdapter.CalendarReconcilerId
+                : isMutation
+                    ? $"ali.reconcile.{toolName}"
+                    : null;
 
         return new CapabilityEffectDescriptor(
             kind,
             EffectSummary(kind),
             boundary,
-            SupportsIdempotency: !isMutation && !ExplicitlyNonIdempotentToolNames.Contains(toolName),
-            ReconcilerId: isMutation ? $"ali.reconcile.{toolName}" : null,
+            SupportsIdempotency: !isMutation,
+            ReconcilerId: reconcilerId,
             ReadsLocalData: readsLocalData,
             WritesLocalData: writesLocalData,
             UsesNetwork: usesNetwork,
             StartsProcesses: startsProcesses,
-            ChangesSystemState: ChangesSystemStateToolNames.Contains(toolName)
-                || MsBuildWorkspaceToolNames.Contains(toolName)
-                || ProjectControlledExecutionToolNames.Contains(toolName));
+            ChangesSystemState: !safeTargetDomainRead
+                && (ChangesSystemStateToolNames.Contains(toolName)
+                    || MsBuildWorkspaceToolNames.Contains(toolName)
+                    || ProjectControlledExecutionToolNames.Contains(toolName)));
     }
 
     private static CapabilityRiskLevel RiskFor(CapabilityEffectKind kind) => kind switch

@@ -103,25 +103,17 @@ internal static class LiveSemanticToolDirectory
         IReadOnlyList<AIFunctionDeclaration> liveTools) =>
         BuildBoundedDirectory(CreateDirectoryBuckets(liveTools));
 
+    public static IReadOnlyList<ToolBucketDefinition> CreateBoundedDirectoryBuckets(
+        IReadOnlyList<AIFunctionDeclaration> liveTools) =>
+        SelectBoundedDirectoryBuckets(CreateDirectoryBuckets(liveTools));
+
     public static string BuildBoundedDirectory(IReadOnlyList<ToolBucketDefinition> buckets)
     {
-        var included = buckets.Take(MaximumDirectoryBuckets).ToArray();
+        var included = SelectBoundedDirectoryBuckets(buckets);
         var lines = included
             .Select(bucket => SemanticToolBuckets.BuildDirectory([bucket]))
             .ToArray();
-        var accepted = new List<string>(lines.Length);
-        var characters = 0;
-        foreach (var line in lines)
-        {
-            var separatorLength = accepted.Count == 0 ? 0 : Environment.NewLine.Length;
-            if (characters + separatorLength + line.Length > MaximumDirectoryCharacters - 128)
-            {
-                break;
-            }
-
-            accepted.Add(line);
-            characters += separatorLength + line.Length;
-        }
+        var accepted = lines.ToList();
 
         var omitted = buckets.Count - accepted.Count;
         if (omitted > 0)
@@ -130,6 +122,28 @@ internal static class LiveSemanticToolDirectory
         }
 
         return string.Join(Environment.NewLine, accepted);
+    }
+
+    private static IReadOnlyList<ToolBucketDefinition> SelectBoundedDirectoryBuckets(
+        IReadOnlyList<ToolBucketDefinition> buckets)
+    {
+        var accepted = new List<ToolBucketDefinition>(
+            Math.Min(buckets.Count, MaximumDirectoryBuckets));
+        var characters = 0;
+        foreach (var bucket in buckets.Take(MaximumDirectoryBuckets))
+        {
+            var line = SemanticToolBuckets.BuildDirectory([bucket]);
+            var separatorLength = accepted.Count == 0 ? 0 : Environment.NewLine.Length;
+            if (characters + separatorLength + line.Length > MaximumDirectoryCharacters - 128)
+            {
+                break;
+            }
+
+            accepted.Add(bucket);
+            characters += separatorLength + line.Length;
+        }
+
+        return accepted;
     }
 }
 
@@ -264,6 +278,18 @@ internal sealed class SettingsAwareSemanticToolCatalog : ISemanticToolCatalog
         _semanticCatalog = new QdrantSemanticToolCatalog(httpClient, qdrant, settings);
     }
 
+    internal SettingsAwareSemanticToolCatalog(
+        HttpClient httpClient,
+        QdrantServiceManager qdrant,
+        LocalVectorLibrarySettingsSnapshotOwner settingsOwner)
+        : this(
+            httpClient,
+            qdrant,
+            () => settingsOwner.Capture().Settings)
+    {
+        ArgumentNullException.ThrowIfNull(settingsOwner);
+    }
+
     public Task<SemanticToolSelection> SelectAsync(
         string need,
         IReadOnlyList<AIFunctionDeclaration> liveTools,
@@ -278,6 +304,7 @@ internal sealed class SettingsAwareSemanticToolCatalog : ISemanticToolCatalog
                 need,
                 liveTools,
                 retainedToolNames,
+                settings,
                 cancellationToken);
         }
 
@@ -313,7 +340,8 @@ internal sealed class QdrantSemanticToolCatalog : ISemanticToolCatalog
 {
     internal const string CollectionNamePrefix = "ali_semantic_tool_catalog_v2";
     internal const int MaximumCandidateBuckets = 1;
-    internal const int CollectionFingerprintCharacters = 64;
+    internal const int CollectionFingerprintCharacters = 24;
+    private const int FullFingerprintCharacters = 64;
     private const int MaximumEmbeddingChunkCharacters = 700;
 
     private readonly OpenAiCompatibleEmbeddingClient _embeddingClient;
@@ -332,12 +360,26 @@ internal sealed class QdrantSemanticToolCatalog : ISemanticToolCatalog
         _settings = settings;
     }
 
-    public async Task<SemanticToolSelection> SelectAsync(
+    public Task<SemanticToolSelection> SelectAsync(
         string need,
         IReadOnlyList<AIFunctionDeclaration> liveTools,
         IReadOnlyCollection<string> retainedToolNames,
+        CancellationToken cancellationToken) =>
+        SelectAsync(
+            need,
+            liveTools,
+            retainedToolNames,
+            _settings(),
+            cancellationToken);
+
+    internal async Task<SemanticToolSelection> SelectAsync(
+        string need,
+        IReadOnlyList<AIFunctionDeclaration> liveTools,
+        IReadOnlyCollection<string> retainedToolNames,
+        LocalVectorLibrarySettings settings,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(settings);
         var buckets = LiveSemanticToolDirectory.CreateBuckets(liveTools);
         var directory = LiveSemanticToolDirectory.BuildBoundedDirectoryFor(liveTools);
         if (liveTools.Count == 0)
@@ -372,7 +414,6 @@ internal sealed class QdrantSemanticToolCatalog : ISemanticToolCatalog
 
         try
         {
-            var settings = _settings();
             var runtime = await _qdrant.EnsureAvailableAsync(settings, cancellationToken).ConfigureAwait(false);
             if (!runtime.IsReachable)
             {
@@ -500,6 +541,14 @@ internal sealed class QdrantSemanticToolCatalog : ISemanticToolCatalog
                 return collectionName;
             }
 
+            using var client = _qdrant.CreateClient(settings);
+            if (await client.CollectionExistsAsync(collectionName, cancellationToken)
+                    .ConfigureAwait(false))
+            {
+                _publishedIndexKey = publicationKey;
+                return collectionName;
+            }
+
             var vectors = new List<float[]>(buckets.Count);
             foreach (var bucket in buckets)
             {
@@ -516,7 +565,6 @@ internal sealed class QdrantSemanticToolCatalog : ISemanticToolCatalog
                 vectors.Add(vector);
             }
 
-            using var client = _qdrant.CreateClient(settings);
             if (!await client.CollectionExistsAsync(collectionName, cancellationToken).ConfigureAwait(false))
             {
                 try
@@ -723,7 +771,7 @@ internal sealed class QdrantSemanticToolCatalog : ISemanticToolCatalog
 
     internal static string BuildCollectionName(string fingerprint)
     {
-        if (fingerprint.Length != CollectionFingerprintCharacters
+        if (fingerprint.Length != FullFingerprintCharacters
             || fingerprint.Any(character => !Uri.IsHexDigit(character)))
         {
             throw new ArgumentException("A full hexadecimal registry fingerprint is required.", nameof(fingerprint));
