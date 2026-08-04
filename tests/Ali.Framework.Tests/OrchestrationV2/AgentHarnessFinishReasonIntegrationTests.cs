@@ -216,7 +216,8 @@ public sealed class AgentHarnessFinishReasonIntegrationTests
             Interlocked.Increment(ref _requestCount);
             var decisionJson = PlanningContractTests.DecisionJson(
                 $"{{\"kind\":\"answerDirectly\",\"answer\":{JsonSerializer.Serialize(answer)}}}");
-            var arguments = JsonSerializer.Deserialize<Dictionary<string, object?>>(decisionJson)
+            var transportJson = PlanningContractTests.TransportJson(decisionJson);
+            var arguments = JsonSerializer.Deserialize<Dictionary<string, object?>>(transportJson)
                 ?? throw new InvalidDataException("The native protocol decision did not deserialize.");
             var message = new AIChatMessage(AIChatRole.Assistant, string.Empty);
             message.Contents.Add(new FunctionCallContent(

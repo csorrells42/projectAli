@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Text.Json;
+using Ali.Modules.Capabilities;
 using Ali.Modules.Orchestration.Planning;
 using Ali.Modules.Orchestration.Work;
 using Microsoft.Extensions.AI;
@@ -11,8 +12,9 @@ public sealed class PlanningContractTests
     [Fact]
     public void NativeAndCompatibilityDecoders_ProduceTheSameTypedEnvelope()
     {
-        var json = DecisionJson(CallToolJson("read_file", "path", "README.md"));
-        using var document = JsonDocument.Parse(json);
+        var decisionJson = DecisionJson(CallToolJson("read_file", "path", "README.md"));
+        var transportJson = TransportJson(decisionJson);
+        using var document = JsonDocument.Parse(transportJson);
         var arguments = document.RootElement.EnumerateObject()
             .ToDictionary(property => property.Name, property => (object?)property.Value.Clone());
         var nativeMessage = new ChatMessage(ChatRole.Assistant, string.Empty);
@@ -23,7 +25,7 @@ public sealed class PlanningContractTests
 
         var native = AliOrchestrationDecisionDecoder.DecodeNative(new ChatResponse(nativeMessage));
         var compatibility = AliOrchestrationDecisionDecoder.DecodeCompatibility(
-            new ChatResponse(new ChatMessage(ChatRole.Assistant, json)));
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, transportJson)));
 
         Assert.True(native.IsSuccess, native.Error);
         Assert.True(compatibility.IsSuccess, compatibility.Error);
@@ -33,6 +35,218 @@ public sealed class PlanningContractTests
         var action = Assert.IsType<CallToolAction>(native.Decision!.NextAction);
         Assert.Equal("Inspect the requested file", action.Need);
         Assert.Equal("The file contents will be available as evidence", action.ExpectedProgress);
+    }
+
+    [Fact]
+    public void ProviderTransportSchema_IsCompactAndIndependentOfSelectedTaskSchemas()
+    {
+        var tool = AIFunctionFactory.Create(
+            (string path) => path,
+            "read_file",
+            "Read one file.");
+
+        var withoutTool = AliOrchestrationProtocol.CreateDeclaration([]).JsonSchema.GetRawText();
+        var withTool = AliOrchestrationProtocol.CreateDeclaration([tool]).JsonSchema.GetRawText();
+
+        Assert.Equal(withoutTool, withTool);
+        Assert.Contains("\"decisionJson\"", withTool, StringComparison.Ordinal);
+        Assert.DoesNotContain("read_file", withTool, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"oneOf\"", withTool, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"$defs\"", withTool, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"$ref\"", withTool, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ProviderTransportDecoders_RejectRawV1Decisions()
+    {
+        var rawDecision = DecisionJson(
+            "{\"kind\":\"answerDirectly\",\"answer\":\"must not pass\"}");
+        using var document = JsonDocument.Parse(rawDecision);
+        var rawArguments = document.RootElement.EnumerateObject()
+            .ToDictionary(property => property.Name, property => (object?)property.Value.Clone());
+        var nativeMessage = new ChatMessage(ChatRole.Assistant, string.Empty);
+        nativeMessage.Contents.Add(new FunctionCallContent(
+            "raw-v1",
+            OrchestrationProtocolCapability.ToolName,
+            rawArguments));
+
+        var native = AliOrchestrationDecisionDecoder.DecodeNative(new ChatResponse(nativeMessage));
+        var compatibility = AliOrchestrationDecisionDecoder.DecodeCompatibility(
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, rawDecision)));
+
+        Assert.False(native.IsSuccess);
+        Assert.False(compatibility.IsSuccess);
+        Assert.Contains("not an allowed property", native.Error, StringComparison.Ordinal);
+        Assert.Contains("not an allowed property", compatibility.Error, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("{\"decisionJson\":null}")]
+    [InlineData("{\"decisionJson\":\"\"}")]
+    [InlineData("{\"decisionJson\":\"{}\",\"extra\":true}")]
+    [InlineData("{\"decisionJson\":\"{}\",\"decisionJson\":\"{}\"}")]
+    [InlineData("{\"decisionJson\":\"```json\\n{}\\n```\"}")]
+    [InlineData("{\"decisionJson\":\"\\\"{}\\\"\"}")]
+    public void CompatibilityTransport_RejectsMalformedOrAmbiguousEnvelopes(string transport)
+    {
+        var result = AliOrchestrationDecisionDecoder.DecodeCompatibility(
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, transport)));
+
+        Assert.False(result.IsSuccess);
+        Assert.False(string.IsNullOrWhiteSpace(result.Error));
+    }
+
+    [Fact]
+    public void RegisteredToolSchemaValidator_EnforcesValueConstraintsLocally()
+    {
+        using var schemaDocument = JsonDocument.Parse(
+            """
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "count", "tags"],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 5,
+                  "pattern": "^[A-Z]+$"
+                },
+                "count": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 3
+                },
+                "tags": {
+                  "type": "array",
+                  "minItems": 2,
+                  "maxItems": 3,
+                  "uniqueItems": true,
+                  "items": { "type": "string" }
+                }
+              }
+            }
+            """);
+        using var valueDocument = JsonDocument.Parse(
+            """{"name":"a","count":4,"tags":["x","x"]}""");
+        var errors = new List<string>();
+
+        CapabilityJsonSchemaValidator.Validate(
+            valueDocument.RootElement,
+            schemaDocument.RootElement,
+            "CallTool.arguments",
+            errors);
+
+        Assert.Contains(errors, error => error.Contains("at least 3 characters", StringComparison.Ordinal));
+        Assert.Contains(errors, error => error.Contains("string pattern", StringComparison.Ordinal));
+        Assert.Contains(errors, error => error.Contains("numeric bound 'maximum'", StringComparison.Ordinal));
+        Assert.Contains(errors, error => error.Contains("unique items", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void RegisteredToolSchemaValidator_RejectsUnsupportedKeywordsAndTypesFailClosed()
+    {
+        using var schemaDocument = JsonDocument.Parse(
+            """{"type":"mystery","not":{"type":"string"}}""");
+        using var valueDocument = JsonDocument.Parse("{}");
+        var errors = new List<string>();
+
+        CapabilityJsonSchemaValidator.Validate(
+            valueDocument.RootElement,
+            schemaDocument.RootElement,
+            "CallTool.arguments",
+            errors);
+
+        Assert.Contains(errors, error => error.Contains("unsupported registered-schema keyword 'not'", StringComparison.Ordinal));
+        Assert.Contains(errors, error => error.Contains("unsupported JSON type", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void RegisteredToolSchemaValidator_RejectsReferencesIntoNonSchemaAnnotations()
+    {
+        using var schemaDocument = JsonDocument.Parse(
+            """
+            {
+              "type": "object",
+              "properties": {
+                "value": { "$ref": "#/$defs/Holder/default" }
+              },
+              "$defs": {
+                "Holder": {
+                  "type": "string",
+                  "default": { "pattern": "[" }
+                }
+              }
+            }
+            """);
+
+        Assert.False(CapabilityJsonSchemaValidator.TryValidateSchemaDefinition(
+            schemaDocument.RootElement,
+            out var reason));
+        Assert.Contains("unresolved or non-local", reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RegisteredToolSchemaValidator_BoundsReferenceGraphExpansion()
+    {
+        var definitions = new Dictionary<string, object?>(StringComparer.Ordinal);
+        for (var index = 0; index < 20; index++)
+        {
+            definitions[$"Node{index}"] = new Dictionary<string, object?>
+            {
+                ["allOf"] = new object[]
+                {
+                    new Dictionary<string, object?> { ["$ref"] = $"#/$defs/Node{index + 1}" },
+                    new Dictionary<string, object?> { ["$ref"] = $"#/$defs/Node{index + 1}" }
+                }
+            };
+        }
+        definitions["Node20"] = new Dictionary<string, object?> { ["type"] = "string" };
+        var schema = JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+        {
+            ["type"] = "object",
+            ["additionalProperties"] = false,
+            ["properties"] = new Dictionary<string, object?>
+            {
+                ["value"] = new Dictionary<string, object?> { ["$ref"] = "#/$defs/Node0" }
+            },
+            ["$defs"] = definitions
+        });
+        var value = JsonSerializer.SerializeToElement(new { value = "bounded" });
+        var errors = new List<string>();
+
+        CapabilityJsonSchemaValidator.Validate(value, schema, "CallTool.arguments", errors);
+
+        Assert.Contains(
+            errors,
+            error => error.Contains("validation operation count", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void DecisionValidator_EnforcesFullDecisionCardinalityAfterCompactTransport()
+    {
+        var claims = Enumerable.Range(0, 129)
+            .Select(index => new OrchestrationMaterialClaim(
+                $"claim-{index}",
+                "Bounded claim",
+                MaterialClaimKind.CurrentFact,
+                []))
+            .ToArray();
+        var decision = new OrchestrationDecision(
+            workUpdate: null,
+            claims,
+            new AnswerDirectlyAction("The cardinality gate must run first."));
+
+        var result = new OrchestrationDecisionValidator().Validate(
+            decision,
+            new OrchestrationValidationContext(0, []));
+
+        Assert.False(result.IsValid);
+        Assert.Contains(
+            result.Errors,
+            error => error.Contains(
+                "materialClaims exceeds the bounded maximum of 128 items",
+                StringComparison.Ordinal));
     }
 
     [Fact]
@@ -773,6 +987,12 @@ public sealed class PlanningContractTests
           "nextAction": {{nextAction}}
         }
         """;
+
+    internal static string TransportJson(string decisionJson) =>
+        JsonSerializer.Serialize(new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [AliOrchestrationProtocol.DecisionJsonPropertyName] = decisionJson
+        });
 
     internal static string CallToolJson(string toolName, string argumentName, string argumentValue) =>
         $$"""

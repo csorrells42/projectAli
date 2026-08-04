@@ -58,6 +58,7 @@ internal sealed class AliCompletionComposer
 
         BoundModelDispatchSnapshot dispatch;
         TurnRuntimeBindings currentBindings;
+        bool useNativeProtocol;
         try
         {
             dispatch = _captureDispatch()
@@ -72,6 +73,8 @@ internal sealed class AliCompletionComposer
                 ?? throw new InvalidOperationException(
                     "The completion binding factory returned no exact binding snapshot.");
             currentBindings.Validate();
+            useNativeProtocol = AliOrchestrationPlanningClient.RequireBoundEngineeringProtocol(
+                dispatch);
         }
         catch (Exception exception) when (exception is not OperationCanceledException
                                           and not OutOfMemoryException)
@@ -79,12 +82,10 @@ internal sealed class AliCompletionComposer
             return BindingFailure(changedBindings: null);
         }
 
-        var allowNativeProtocol = dispatch.Profile.SupportsToolCalls;
-        string? previousCompatibilityFailureFingerprint = null;
+        string? previousFailureFingerprint = null;
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var useNativeProtocol = allowNativeProtocol;
             var options = CreateCompositionOptions(dispatch, protocol, useNativeProtocol);
             var authorization = await AuthorizePassAsync(
                     request,
@@ -129,24 +130,15 @@ internal sealed class AliCompletionComposer
             catch (Exception exception) when (exception is not OperationCanceledException
                                               and not OutOfMemoryException)
             {
-                if (useNativeProtocol)
-                {
-                    allowNativeProtocol = false;
-                    previousCompatibilityFailureFingerprint = null;
-                    continue;
-                }
-
                 return OutputFailure(draft);
             }
 
             if (!IsCompleteCompositionEnvelope(response, useNativeProtocol))
             {
                 if (ShouldPauseAfterRejectedOutput(
-                        useNativeProtocol,
                         pager,
                         draft,
-                        ref allowNativeProtocol,
-                        ref previousCompatibilityFailureFingerprint))
+                        ref previousFailureFingerprint))
                 {
                     return OutputFailure(draft);
                 }
@@ -160,11 +152,9 @@ internal sealed class AliCompletionComposer
             if (!decoded.IsSuccess)
             {
                 if (ShouldPauseAfterRejectedOutput(
-                        useNativeProtocol,
                         pager,
                         draft,
-                        ref allowNativeProtocol,
-                        ref previousCompatibilityFailureFingerprint))
+                        ref previousFailureFingerprint))
                 {
                     return OutputFailure(draft);
                 }
@@ -214,16 +204,14 @@ internal sealed class AliCompletionComposer
 
             if (actionAccepted)
             {
-                previousCompatibilityFailureFingerprint = null;
+                previousFailureFingerprint = null;
                 continue;
             }
 
             if (ShouldPauseAfterRejectedOutput(
-                    useNativeProtocol,
                     pager,
                     draft,
-                    ref allowNativeProtocol,
-                    ref previousCompatibilityFailureFingerprint))
+                    ref previousFailureFingerprint))
             {
                 return OutputFailure(draft);
             }
@@ -302,7 +290,11 @@ internal sealed class AliCompletionComposer
                 + "that complete page is committed only with the segment. Declare a covered claim "
                 + "ID only when this segment explicitly covers it. When the page is empty, append "
                 + "another complete segment if the answer still needs text. Return finishAnswer "
-                + "only when canFinish is true. Never repeat text before committedOffset."),
+                + "only when canFinish is true. Never repeat text before committedOffset. Your "
+                + "mandatory provider transport is one object containing only a decisionJson "
+                + "string. That string must contain exactly one inner object matching this "
+                + "authoritative answer-composition schema: "
+                + AliAnswerCompositionProtocol.DecisionSchema.GetRawText()),
             new MeaiChatMessage(MeaiChatRole.User, input)
         });
     }
@@ -544,23 +536,14 @@ internal sealed class AliCompletionComposer
     }
 
     private static bool ShouldPauseAfterRejectedOutput(
-        bool usedNativeProtocol,
         AliCompletionProjectionPager pager,
         AliAnswerDraftStore draft,
-        ref bool allowNativeProtocol,
-        ref string? previousCompatibilityFailureFingerprint)
+        ref string? previousFailureFingerprint)
     {
-        if (usedNativeProtocol)
-        {
-            allowNativeProtocol = false;
-            previousCompatibilityFailureFingerprint = null;
-            return false;
-        }
-
         var snapshot = draft.Snapshot(maximumPriorTailCharacters: 0);
         var fingerprint = TurnStateIntegrity.Digest(JsonSerializer.SerializeToUtf8Bytes(new
         {
-            protocol = "Ali.AnswerComposition.UnchangedFailure.v1",
+            protocol = "Ali.AnswerComposition.UnchangedFailure.v2",
             pager.SourceDigest,
             pager.Cursor,
             snapshot.AnswerId,
@@ -570,10 +553,10 @@ internal sealed class AliCompletionComposer
             remainingClaimIds = snapshot.RemainingClaimIds
         }));
         var repeated = string.Equals(
-            previousCompatibilityFailureFingerprint,
+            previousFailureFingerprint,
             fingerprint,
             StringComparison.Ordinal);
-        previousCompatibilityFailureFingerprint = fingerprint;
+        previousFailureFingerprint = fingerprint;
         return repeated;
     }
 

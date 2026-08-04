@@ -48,6 +48,7 @@ internal sealed class AliCompletionCritic
         BoundModelDispatchSnapshot dispatch;
         TurnRuntimeBindings bindings;
         AliCompletionDispatchAuthorization authorization;
+        bool useNativeProtocol;
         try
         {
             dispatch = _captureDispatch()
@@ -62,6 +63,8 @@ internal sealed class AliCompletionCritic
                 ?? throw new InvalidOperationException(
                     "The completion-critic binding factory returned no exact snapshot.");
             bindings.Validate();
+            useNativeProtocol =
+                AliOrchestrationPlanningClient.RequireBoundEngineeringProtocol(dispatch);
             authorization = await _authorizeDispatch(
                     request.StateRevision,
                     bindings,
@@ -130,6 +133,7 @@ internal sealed class AliCompletionCritic
                 identity,
                 dispatch,
                 bindings,
+                useNativeProtocol,
                 pageMessages,
                 singlePageMessages));
     }
@@ -349,7 +353,7 @@ internal sealed class AliCompletionCritic
             response = await prepared.Dispatch.ChatClient
                 .GetResponseAsync(
                     messages,
-                    CreateOptions(prepared.Dispatch),
+                    CreateOptions(prepared),
                     cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -361,7 +365,9 @@ internal sealed class AliCompletionCritic
                 + "verdict. The exact review identity remains recorded; no answer was published."));
         }
 
-        var decoded = AliCompletionCriticProtocol.Decode(response);
+        var decoded = prepared.UseNativeProtocol
+            ? AliCompletionCriticProtocol.DecodeNative(response)
+            : AliCompletionCriticProtocol.DecodeCompatibility(response);
         return decoded.IsSuccess
             ? CallResult.Completed(decoded.Verdict!)
             : CallResult.Failed(OutputFailure(
@@ -370,24 +376,40 @@ internal sealed class AliCompletionCritic
                 + "published and malformed critic prose was discarded."));
     }
 
-    private static ChatOptions CreateOptions(BoundModelDispatchSnapshot dispatch) =>
-        new()
+    private static ChatOptions CreateOptions(AliCompletionCriticPreparedReview prepared)
+    {
+        var protocol = AliCompletionCriticProtocol.CreateAdmissionDeclaration();
+        var options = new ChatOptions
         {
             Instructions = null,
-            Tools = [],
-            ToolMode = ChatToolMode.None,
             AllowMultipleToolCalls = false,
-            MaxOutputTokens = dispatch.Profile.OutputTokenLimit,
-            ResponseFormat = ChatResponseFormat.ForJsonSchema(
-                AliCompletionCriticProtocol.JsonSchema,
-                AliCompletionCriticProtocol.SchemaName),
+            MaxOutputTokens = prepared.Dispatch.Profile.OutputTokenLimit,
             AdditionalProperties = new AdditionalPropertiesDictionary
             {
                 [AliInternalModelRoutingProperties.SuppressInjectedPersona] = true,
                 [AliInternalModelRoutingProperties.BoundReasoningEffort] =
-                    dispatch.GenerationSettingsBinding.ReasoningEffort
+                    prepared.Dispatch.GenerationSettingsBinding.ReasoningEffort
             }
         };
+
+        if (prepared.UseNativeProtocol)
+        {
+            options.Tools = [protocol];
+            options.ToolMode = ChatToolMode.RequireSpecific(
+                AliCompletionCriticProtocol.SchemaName);
+            options.ResponseFormat = null;
+        }
+        else
+        {
+            options.Tools = null;
+            options.ToolMode = ChatToolMode.None;
+            options.ResponseFormat = ChatResponseFormat.ForJsonSchema(
+                protocol.JsonSchema,
+                AliCompletionCriticProtocol.SchemaName);
+        }
+
+        return options;
+    }
 
     private static AliCompletionCriticVerdict Aggregate(
         IReadOnlyList<AliCompletionCriticVerdict> pages,

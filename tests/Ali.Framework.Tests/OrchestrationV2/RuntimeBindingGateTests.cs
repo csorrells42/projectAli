@@ -71,6 +71,85 @@ public sealed class RuntimeBindingGateTests
     }
 
     [Theory]
+    [InlineData("transport")]
+    [InlineData("decode")]
+    [InlineData("validation")]
+    public async Task PlanningPass_ExactBoundNativeFailure_SuspendsWithoutCrossTransport(
+        string failureKind)
+    {
+        using var directory = new TemporaryDirectory("Ali-RuntimeBinding-NativeProtocol-");
+        var identity = Identity();
+        var bindings = Bindings();
+        var turnContext = TurnContext(identity, "Use the exact native protocol.");
+        var profile = PlanningTestModelProfile.GptOss65K() with
+        {
+            SupportsToolCalls = true,
+            ProtocolIdentity = RuntimeProtocolIdentities.NativeOpenAiTools,
+            CapabilityProfileIdentity = "exact-native-capability-v2"
+        };
+        var model = new CallbackChatClient(_ => failureKind switch
+        {
+            "transport" => throw new HttpRequestException("simulated native transport failure"),
+            "decode" => Native("{not-valid-json"),
+            "validation" => Native(PlanningContractTests.ToolDecisionJson(
+                "tool-not-selected",
+                "path",
+                "README.md")),
+            _ => throw new ArgumentOutOfRangeException(nameof(failureKind), failureKind, null)
+        });
+
+        using var coordinator = new AliPlanningStateCoordinator(directory.Path, "profile");
+        await using var durableTurn = await coordinator.BeginTurnAsync(
+            turnContext,
+            bindings,
+            acceptedPriorConversation: [],
+            capabilityRegistry: null,
+            liveBindingsAccessor: () => bindings,
+            TestContext.Current.CancellationToken);
+        using var planner = new AliOrchestrationPlanningClient(
+            model,
+            () => true,
+            () => profile,
+            boundDispatchAccessor: () => Snapshot(model, profile),
+            dispatchBindingsFactory: _ => bindings);
+        using var turnScope = planner.BeginTurn(turnContext, durableTurn.Input, durableTurn);
+
+        var response = await planner.GetResponseAsync(
+            [],
+            new ChatOptions(),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, model.RequestCount);
+        Assert.Contains("required orchestration protocol", response.Text, StringComparison.Ordinal);
+        Assert.Equal(
+            AliPlanningInterimKind.ProtocolSuspended,
+            Assert.IsType<AliPreparedInterimResponse>(planner.PreparedInterimResponse).Kind);
+        var options = Assert.IsType<ChatOptions>(model.LastOptions);
+        Assert.Null(options.ResponseFormat);
+        var protocol = Assert.IsAssignableFrom<AIFunctionDeclaration>(Assert.Single(options.Tools!));
+        Assert.Equal(OrchestrationProtocolCapability.ToolName, protocol.Name);
+    }
+
+    [Fact]
+    public void PlanningPass_PersistedV1EngineeringProtocol_IsRejectedBeforeModelRequest()
+    {
+        var model = new CallbackChatClient(_ => Compatibility(
+            PlanningContractTests.DecisionJson(
+                "{\"kind\":\"answerDirectly\",\"answer\":\"must not run\"}")));
+        var staleProfile = PlanningTestModelProfile.GptOss65K() with
+        {
+            SupportsToolCalls = true,
+            ProtocolIdentity = "openai-compatible-native-tools-v1"
+        };
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            AliOrchestrationPlanningClient.RequireBoundEngineeringProtocol(
+                Snapshot(model, staleProfile)));
+
+        Assert.Contains("neither native tools", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(0, model.RequestCount);
+    }
+
+    [Theory]
     [MemberData(nameof(ExactBindingChanges))]
     public async Task PlanningPass_AnyExactBindingChange_SuspendsBeforeAnotherModelRequest(
         string changedBinding)
@@ -675,11 +754,29 @@ public sealed class RuntimeBindingGateTests
         "read_file",
         "Read a file by exact path.");
 
-    private static ChatResponse Compatibility(string json) =>
-        new(new ChatMessage(ChatRole.Assistant, json))
+    private static ChatResponse Compatibility(string decisionJson) =>
+        new(new ChatMessage(
+            ChatRole.Assistant,
+            PlanningContractTests.TransportJson(decisionJson)))
         {
             FinishReason = ChatFinishReason.Stop
         };
+
+    private static ChatResponse Native(string decisionJson)
+    {
+        var message = new ChatMessage(ChatRole.Assistant, string.Empty);
+        message.Contents.Add(new FunctionCallContent(
+            "native-decision",
+            OrchestrationProtocolCapability.ToolName,
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                [AliOrchestrationProtocol.DecisionJsonPropertyName] = decisionJson
+            }));
+        return new ChatResponse(message)
+        {
+            FinishReason = ChatFinishReason.ToolCalls
+        };
+    }
 
     private static async Task ConsumeResponseAsync(
         IChatClient client,
@@ -742,12 +839,15 @@ public sealed class RuntimeBindingGateTests
 
         internal int RequestCount => Volatile.Read(ref _requestCount);
 
+        internal ChatOptions? LastOptions { get; private set; }
+
         public Task<ChatResponse> GetResponseAsync(
             IEnumerable<ChatMessage> messages,
             ChatOptions? options = null,
             CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            LastOptions = options;
             var requestNumber = Interlocked.Increment(ref _requestCount);
             return Task.FromResult(responseFactory(requestNumber));
         }

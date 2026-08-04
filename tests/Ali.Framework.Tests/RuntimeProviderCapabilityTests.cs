@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using Ali.Framework.Tests.OrchestrationV2;
 using Ali.Modules.Orchestration.Planning;
 using Ali.Modules.Runtime;
 using Ali.UI.ViewModels;
@@ -164,7 +165,28 @@ public sealed class RuntimeProviderCapabilityTests
             nativeProbeSucceeds ? RuntimeCapabilityState.Supported : RuntimeCapabilityState.Unsupported,
             profile.NativeToolCalling.State);
         Assert.Equal(RuntimeCapabilityState.Supported, profile.StructuredDecision.State);
-        Assert.Equal(profile, profiles.Load(profile.Identity));
+        var persistedPath = Path.Combine(
+            folder.Path,
+            "RuntimeCapabilities",
+            profile.Identity + ".json");
+        Assert.True(File.Exists(persistedPath));
+        using (var persisted = JsonDocument.Parse(File.ReadAllText(persistedPath)))
+        {
+            var root = persisted.RootElement;
+            Assert.Equal(profile.Identity, root.GetProperty("identity").GetString());
+            Assert.Equal(profile.Provider, root.GetProperty("provider").GetString());
+            Assert.Equal(profile.Endpoint, root.GetProperty("endpoint").GetString());
+            Assert.Equal(profile.Model, root.GetProperty("model").GetString());
+            Assert.Equal(profile.ProtocolIdentity, root.GetProperty("protocolIdentity").GetString());
+            Assert.Equal(profile.ContextTokens, root.GetProperty("contextTokens").GetInt32());
+            Assert.Equal(profile.OutputTokenLimit, root.GetProperty("outputTokenLimit").GetInt32());
+            Assert.Equal(
+                (int)profile.NativeToolCalling.State,
+                root.GetProperty("nativeToolCalling").GetProperty("state").GetInt32());
+            Assert.Equal(
+                (int)profile.StructuredDecision.State,
+                root.GetProperty("structuredDecision").GetProperty("state").GetInt32());
+        }
 
         var dispatch = ((IBoundModelDispatchSource)runtime).CaptureBoundModelDispatch();
         Assert.Equal(profile.Identity, dispatch.RuntimeBinding.CapabilityProfileIdentity);
@@ -303,6 +325,8 @@ public sealed class RuntimeProviderCapabilityTests
         Assert.Equal(65_536, differentContext.ContextTokens);
         Assert.Equal(RuntimeProtocolIdentities.NativeOpenAiTools, native.ProtocolIdentity);
         Assert.Equal(RuntimeProtocolIdentities.StructuredDecision, structured.ProtocolIdentity);
+        Assert.Equal("openai-compatible-native-tools-v2", native.ProtocolIdentity);
+        Assert.Equal("ali-validated-json-schema-decision-v2", structured.ProtocolIdentity);
     }
 
     private static OpenAiCompatibleRuntimeOptions CreateOptions(Uri endpoint) =>
@@ -365,15 +389,49 @@ public sealed class RuntimeProviderCapabilityTests
             if (payload.RootElement.TryGetProperty("tools", out var tools)
                 && tools.ValueKind == JsonValueKind.Array)
             {
+                var decision = PlanningContractTests.DecisionJson(
+                    "{\"kind\":\"answerDirectly\",\"answer\":\"ali-runtime-capability-v1\"}");
                 return nativeToolCallSupported
                     ? Json(
-                        "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":null,\"tool_calls\":[{\"id\":\"call_capability\",\"type\":\"function\",\"function\":{\"name\":\"ali_runtime_capability_probe\",\"arguments\":\"{\\\"value\\\":\\\"ali-runtime-capability-v1\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}")
+                        JsonSerializer.Serialize(new
+                        {
+                            choices = new[]
+                            {
+                                new
+                                {
+                                    message = new
+                                    {
+                                        role = "assistant",
+                                        content = (string?)null,
+                                        tool_calls = new[]
+                                        {
+                                            new
+                                            {
+                                                id = "call_capability",
+                                                type = "function",
+                                                function = new
+                                                {
+                                                    name = "submit_orchestration_decision",
+                                                    arguments = JsonSerializer.Serialize(new
+                                                    {
+                                                        decisionJson = decision
+                                                    })
+                                                }
+                                            }
+                                        }
+                                    },
+                                    finish_reason = "tool_calls"
+                                }
+                            }
+                        }))
                     : Completion("native tool protocol unavailable");
             }
 
             if (payload.RootElement.TryGetProperty("response_format", out _))
             {
-                return Completion("{\"accepted\":true,\"nonce\":\"ali-structured-decision-v1\"}");
+                var decision = PlanningContractTests.DecisionJson(
+                    "{\"kind\":\"answerDirectly\",\"answer\":\"ali-structured-decision-v1\"}");
+                return Completion(JsonSerializer.Serialize(new { decisionJson = decision }));
             }
 
             return Completion("OK");

@@ -31,14 +31,15 @@ internal sealed record AliAnswerCompositionDecodeResult(
 internal static class AliAnswerCompositionProtocol
 {
     internal const string ToolName = "submit_answer_composition";
+    internal static JsonElement DecisionSchema { get; } = BuildDecisionSchema();
 
     internal static AIFunctionDeclaration CreateDeclaration() =>
         AIFunctionFactory.CreateDeclaration(
             ToolName,
-            "Commit one complete hash-linked final-answer segment, or finish the exact committed answer.",
-            BuildSchema());
+            "Return one strict answer-composition decision as JSON text in the decisionJson field.",
+            AliOrchestrationProtocol.BuildTransportSchema());
 
-    internal static JsonElement BuildSchema() => JsonSerializer.SerializeToElement(
+    private static JsonElement BuildDecisionSchema() => JsonSerializer.SerializeToElement(
         new Dictionary<string, object?>
         {
             ["oneOf"] = new object[]
@@ -131,9 +132,16 @@ internal static class AliAnswerCompositionDecoder
 
         try
         {
-            return Decode(JsonSerializer.SerializeToElement(
+            var transport = JsonSerializer.SerializeToElement(
                 calls[0].Arguments
-                ?? new Dictionary<string, object?>(StringComparer.Ordinal)));
+                ?? new Dictionary<string, object?>(StringComparer.Ordinal));
+            return AliJsonProtocolTransport.TryDecode(
+                transport,
+                "answer-composition",
+                out var payload,
+                out var error)
+                ? Decode(payload)
+                : AliAnswerCompositionDecodeResult.Failure(error);
         }
         catch (Exception exception) when (exception is JsonException or NotSupportedException)
         {
@@ -144,6 +152,21 @@ internal static class AliAnswerCompositionDecoder
     internal static AliAnswerCompositionDecodeResult DecodeCompatibility(ChatResponse response)
     {
         ArgumentNullException.ThrowIfNull(response);
+        if (response.FinishReason != ChatFinishReason.Stop)
+        {
+            return AliAnswerCompositionDecodeResult.Failure(
+                "answer-composition compatibility transport did not stop explicitly");
+        }
+
+        if (response.Messages
+            .SelectMany(static message => message.Contents)
+            .OfType<FunctionCallContent>()
+            .Any())
+        {
+            return AliAnswerCompositionDecodeResult.Failure(
+                "answer-composition compatibility transport returned an unexpected tool call");
+        }
+
         if (string.IsNullOrWhiteSpace(response.Text))
         {
             return AliAnswerCompositionDecodeResult.Failure("missing-compatibility-envelope");
@@ -151,8 +174,27 @@ internal static class AliAnswerCompositionDecoder
 
         try
         {
-            using var document = JsonDocument.Parse(response.Text);
-            return Decode(document.RootElement);
+            if (response.Text.Length > AliJsonProtocolTransport.MaximumEnvelopeCharacters)
+            {
+                return AliAnswerCompositionDecodeResult.Failure(
+                    "answer-composition transport exceeded its bounded size");
+            }
+
+            using var document = JsonDocument.Parse(
+                response.Text,
+                new JsonDocumentOptions
+                {
+                    AllowTrailingCommas = false,
+                    CommentHandling = JsonCommentHandling.Disallow,
+                    MaxDepth = AliJsonProtocolTransport.MaximumJsonDepth
+                });
+            return AliJsonProtocolTransport.TryDecode(
+                document.RootElement,
+                "answer-composition",
+                out var payload,
+                out var error)
+                ? Decode(payload)
+                : AliAnswerCompositionDecodeResult.Failure(error);
         }
         catch (JsonException)
         {

@@ -98,8 +98,8 @@ public sealed record RuntimeCapabilityProfile(
 
 internal static class RuntimeProtocolIdentities
 {
-    internal const string NativeOpenAiTools = "openai-compatible-native-tools-v1";
-    internal const string StructuredDecision = "ali-validated-json-schema-decision-v1";
+    internal const string NativeOpenAiTools = "openai-compatible-native-tools-v2";
+    internal const string StructuredDecision = "ali-validated-json-schema-decision-v2";
     internal const string ChatOnly = "openai-compatible-chat-only-v1";
 
     internal static string Resolve(
@@ -111,6 +111,7 @@ internal static class RuntimeProtocolIdentities
             : structured.State == RuntimeCapabilityState.Supported
                 ? StructuredDecision
                 : ChatOnly;
+
 }
 
 internal sealed class RuntimeCapabilityProfileStore(string dataRoot)
@@ -143,27 +144,4 @@ internal sealed class RuntimeCapabilityProfileStore(string dataRoot)
         }
     }
 
-    internal RuntimeCapabilityProfile? Load(string identity)
-    {
-        if (string.IsNullOrWhiteSpace(identity)
-            || identity.Any(character => !char.IsAsciiHexDigit(character)))
-        {
-            return null;
-        }
-        var path = Path.Combine(_root, identity + ".json");
-        if (!File.Exists(path))
-        {
-            return null;
-        }
-        try
-        {
-            return JsonSerializer.Deserialize<RuntimeCapabilityProfile>(
-                File.ReadAllText(path),
-                JsonOptions);
-        }
-        catch (Exception exception) when (exception is IOException or JsonException or UnauthorizedAccessException)
-        {
-            return null;
-        }
-    }
 }

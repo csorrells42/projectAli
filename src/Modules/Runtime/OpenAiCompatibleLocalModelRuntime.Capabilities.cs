@@ -1,5 +1,6 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
+using Ali.Modules.Orchestration.Planning;
 using Microsoft.Extensions.AI;
 
 namespace Ali.Modules.Runtime;
@@ -173,10 +174,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
         CancellationToken cancellationToken)
     {
         const string nonce = "ali-runtime-capability-v1";
-        var probe = AIFunctionFactory.Create(
-            (string value) => value,
-            "ali_runtime_capability_probe",
-            "Return the supplied fixed capability nonce through one typed tool call.");
+        var probe = AliOrchestrationProtocol.CreateDeclaration([]);
         var options = new ChatOptions
         {
             Tools = [probe],
@@ -191,26 +189,21 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
         try
         {
             var response = await GetResponseAsync(
-                    [new Microsoft.Extensions.AI.ChatMessage(
-                        Microsoft.Extensions.AI.ChatRole.User,
-                        $"Call {probe.Name} exactly once with value '{nonce}'.")],
+                    BuildOrchestrationTransportProbeMessages(nonce, native: true),
                     options,
                     cancellationToken)
                 .ConfigureAwait(false);
-            var call = response.Messages
-                .SelectMany(message => message.Contents)
-                .OfType<FunctionCallContent>()
-                .SingleOrDefault(content =>
-                    !content.InformationalOnly
-                    && string.Equals(content.Name, probe.Name, StringComparison.Ordinal));
-            var returnedNonce = ReadStringArgument(call?.Arguments, "value");
+            var decoded = AliOrchestrationDecisionDecoder.DecodeNative(response);
+            var returnedNonce = (decoded.Decision?.NextAction as AnswerDirectlyAction)?.Answer;
             return new RuntimeCapabilityObservation(
                 string.Equals(returnedNonce, nonce, StringComparison.Ordinal)
                     ? RuntimeCapabilityState.Supported
                     : RuntimeCapabilityState.Unsupported,
-                "Observed through an exact required function-call round trip.",
+                "Observed through Ali's production grammar-safe orchestration function-call transport.",
                 observedAt,
-                call is null ? "No typed function call was returned." : "Typed function-call envelope returned.");
+                decoded.IsSuccess
+                    ? "Typed production transport and exact decision decoder succeeded."
+                    : decoded.Error ?? "No typed orchestration decision was returned.");
         }
         catch (OperationCanceledException)
         {
@@ -234,23 +227,13 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
         CancellationToken cancellationToken)
     {
         const string nonce = "ali-structured-decision-v1";
-        var schema = JsonSerializer.SerializeToElement(new
-        {
-            type = "object",
-            additionalProperties = false,
-            required = new[] { "accepted", "nonce" },
-            properties = new
-            {
-                accepted = new { type = "boolean", @const = true },
-                nonce = new { type = "string", @const = nonce }
-            }
-        });
+        var transport = AliOrchestrationProtocol.CreateDeclaration([]);
         var options = new ChatOptions
         {
             ResponseFormat = ChatResponseFormat.ForJsonSchema(
-                schema,
-                "ali_runtime_structured_decision_probe"),
-            MaxOutputTokens = 64,
+                transport.JsonSchema,
+                "ali_orchestration_decision_transport"),
+            MaxOutputTokens = 256,
             AdditionalProperties = new AdditionalPropertiesDictionary
             {
                 [AliInternalModelRoutingProperties.SuppressInjectedPersona] = true
@@ -259,26 +242,20 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
         try
         {
             var response = await GetResponseAsync(
-                    [new Microsoft.Extensions.AI.ChatMessage(
-                        Microsoft.Extensions.AI.ChatRole.User,
-                        $"Return the supplied schema with accepted true and nonce '{nonce}'.")],
+                    BuildOrchestrationTransportProbeMessages(nonce, native: false),
                     options,
                     cancellationToken)
                 .ConfigureAwait(false);
-            using var document = JsonDocument.Parse(response.Text ?? string.Empty);
-            var root = document.RootElement;
-            var valid = root.ValueKind == JsonValueKind.Object
-                && root.EnumerateObject().Count() == 2
-                && root.TryGetProperty("accepted", out var accepted)
-                && accepted.ValueKind == JsonValueKind.True
-                && root.TryGetProperty("nonce", out var returnedNonce)
-                && returnedNonce.ValueKind == JsonValueKind.String
-                && string.Equals(returnedNonce.GetString(), nonce, StringComparison.Ordinal);
+            var decoded = AliOrchestrationDecisionDecoder.DecodeCompatibility(response);
+            var returnedNonce = (decoded.Decision?.NextAction as AnswerDirectlyAction)?.Answer;
+            var valid = string.Equals(returnedNonce, nonce, StringComparison.Ordinal);
             return new RuntimeCapabilityObservation(
                 valid ? RuntimeCapabilityState.Supported : RuntimeCapabilityState.Unsupported,
-                "Observed through Ali's exact JSON-schema decision envelope.",
+                "Observed through Ali's production grammar-safe structured-decision transport.",
                 observedAt,
-                valid ? "Exact schema returned." : "Response did not match the exact schema.");
+                valid
+                    ? "Structured production transport and exact decision decoder succeeded."
+                    : decoded.Error ?? "Response did not contain the exact probe decision.");
         }
         catch (OperationCanceledException)
         {
@@ -297,19 +274,34 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
         }
     }
 
-    private static string? ReadStringArgument(
-        IDictionary<string, object?>? arguments,
-        string name)
+    private static Microsoft.Extensions.AI.ChatMessage[] BuildOrchestrationTransportProbeMessages(
+        string nonce,
+        bool native)
     {
-        if (arguments is null || !arguments.TryGetValue(name, out var value))
+        var decision = JsonSerializer.Serialize(new
         {
-            return null;
-        }
-        return value switch
-        {
-            string text => text,
-            JsonElement { ValueKind: JsonValueKind.String } element => element.GetString(),
-            _ => null
-        };
+            workUpdate = (object?)null,
+            materialClaims = Array.Empty<object>(),
+            nextAction = new
+            {
+                kind = "answerDirectly",
+                answer = nonce
+            }
+        });
+        var transport = native
+            ? $"Call {Ali.Modules.Capabilities.OrchestrationProtocolCapability.ToolName} exactly once."
+            : "Return exactly one JSON transport object and no prose.";
+        return
+        [
+            new Microsoft.Extensions.AI.ChatMessage(
+                Microsoft.Extensions.AI.ChatRole.System,
+                "Use Ali's production orchestration transport. The transport contains exactly one "
+                + $"{AliOrchestrationProtocol.DecisionJsonPropertyName} string. That string must contain "
+                + "the complete strict decision object supplied by the user."),
+            new Microsoft.Extensions.AI.ChatMessage(
+                Microsoft.Extensions.AI.ChatRole.User,
+                transport + " Put this exact JSON object in "
+                + AliOrchestrationProtocol.DecisionJsonPropertyName + ": " + decision)
+        ];
     }
 }

@@ -32,8 +32,9 @@ public sealed class AttachmentProjectionTests
             },
             new ChatResponse(new ChatMessage(
                 ChatRole.Assistant,
-                PlanningContractTests.DecisionJson(
-                    "{\"kind\":\"answerDirectly\",\"answer\":\"I can inspect it.\"}")))
+                PlanningContractTests.TransportJson(
+                    PlanningContractTests.DecisionJson(
+                        "{\"kind\":\"answerDirectly\",\"answer\":\"I can inspect it.\"}"))))
             {
                 FinishReason = ChatFinishReason.Stop
             });

@@ -27,6 +27,10 @@ public sealed record OrchestrationDecisionDecodeResult
 
 public static class AliOrchestrationDecisionDecoder
 {
+    private const int MaximumDecisionJsonCharacters = 262_144;
+    private const int MaximumTransportEnvelopeCharacters = 1_048_576;
+    private const int MaximumJsonDepth = 64;
+
     public static OrchestrationDecisionDecodeResult DecodeNative(ChatResponse response)
     {
         ArgumentNullException.ThrowIfNull(response);
@@ -50,7 +54,7 @@ public static class AliOrchestrationDecisionDecoder
 
         try
         {
-            return Decode(JsonSerializer.SerializeToElement(
+            return DecodeTransport(JsonSerializer.SerializeToElement(
                 call.Arguments ?? new Dictionary<string, object?>(StringComparer.Ordinal)));
         }
         catch (Exception exception) when (exception is JsonException or NotSupportedException)
@@ -70,10 +74,23 @@ public static class AliOrchestrationDecisionDecoder
                 "The compatibility response did not contain an orchestration decision object.");
         }
 
+        if (text.Length > MaximumTransportEnvelopeCharacters)
+        {
+            return OrchestrationDecisionDecodeResult.Failure(
+                "The compatibility orchestration transport exceeded its bounded size.");
+        }
+
         try
         {
-            using var document = JsonDocument.Parse(text);
-            return Decode(document.RootElement);
+            using var document = JsonDocument.Parse(
+                text,
+                new JsonDocumentOptions
+                {
+                    AllowTrailingCommas = false,
+                    CommentHandling = JsonCommentHandling.Disallow,
+                    MaxDepth = MaximumJsonDepth
+                });
+            return DecodeTransport(document.RootElement);
         }
         catch (JsonException exception)
         {
@@ -101,6 +118,60 @@ public static class AliOrchestrationDecisionDecoder
         catch (DecisionDecodeException exception)
         {
             return OrchestrationDecisionDecodeResult.Failure(exception.Message);
+        }
+    }
+
+    private static OrchestrationDecisionDecodeResult DecodeTransport(JsonElement root)
+    {
+        try
+        {
+            RequireObject(root, "transport");
+            if (root.GetRawText().Length > MaximumTransportEnvelopeCharacters)
+            {
+                return OrchestrationDecisionDecodeResult.Failure(
+                    "The orchestration transport exceeded its bounded size.");
+            }
+
+            RequireExactProperties(
+                root,
+                "transport",
+                AliOrchestrationProtocol.DecisionJsonPropertyName);
+            var decisionJson = RequireProperty(
+                root,
+                AliOrchestrationProtocol.DecisionJsonPropertyName,
+                "transport");
+            if (decisionJson.ValueKind != JsonValueKind.String
+                || string.IsNullOrWhiteSpace(decisionJson.GetString()))
+            {
+                return OrchestrationDecisionDecodeResult.Failure(
+                    "transport.decisionJson must be a non-empty JSON string.");
+            }
+
+            var serializedDecision = decisionJson.GetString()!;
+            if (serializedDecision.Length > MaximumDecisionJsonCharacters)
+            {
+                return OrchestrationDecisionDecodeResult.Failure(
+                    "transport.decisionJson exceeded its bounded size.");
+            }
+
+            using var document = JsonDocument.Parse(
+                serializedDecision,
+                new JsonDocumentOptions
+                {
+                    AllowTrailingCommas = false,
+                    CommentHandling = JsonCommentHandling.Disallow,
+                    MaxDepth = MaximumJsonDepth
+                });
+            return Decode(document.RootElement);
+        }
+        catch (DecisionDecodeException exception)
+        {
+            return OrchestrationDecisionDecodeResult.Failure(exception.Message);
+        }
+        catch (JsonException exception)
+        {
+            return OrchestrationDecisionDecodeResult.Failure(
+                $"transport.decisionJson was not one valid JSON object: {exception.Message}");
         }
     }
 
@@ -186,7 +257,11 @@ public static class AliOrchestrationDecisionDecoder
         var arguments = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
         foreach (var property in argumentsElement.EnumerateObject())
         {
-            arguments.Add(property.Name, property.Value.Clone());
+            if (!arguments.TryAdd(property.Name, property.Value.Clone()))
+            {
+                throw new DecisionDecodeException(
+                    $"nextAction.arguments.{property.Name} appears more than once.");
+            }
         }
 
         return new CallToolAction(

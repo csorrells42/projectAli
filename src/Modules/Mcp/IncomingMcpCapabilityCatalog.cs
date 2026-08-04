@@ -14,6 +14,7 @@ internal enum IncomingMcpCapabilityIssueCode
     SchemaIdentityMismatch,
     DeclarationTooLarge,
     SchemaTooComplex,
+    UnsupportedSchemaDialect,
     CatalogLimitExceeded
 }
 
@@ -182,6 +183,23 @@ internal sealed class IncomingMcpCapabilityCatalog
                     candidate,
                     IncomingMcpCapabilityIssueCode.SchemaTooComplex,
                     "The MCP schema exceeds Ali's bounded nesting limit and was withheld.",
+                    invalidIndexes,
+                    issues);
+                continue;
+            }
+
+            if (!CapabilityJsonSchemaValidator.TryValidateToolArgumentsSchema(
+                    tool.Function.JsonSchema,
+                    out _)
+                || (tool.Function.ReturnJsonSchema is { } declaredReturnSchema
+                    && !CapabilityJsonSchemaValidator.TryValidateSchemaDefinition(
+                        declaredReturnSchema,
+                        out _)))
+            {
+                Reject(
+                    candidate,
+                    IncomingMcpCapabilityIssueCode.UnsupportedSchemaDialect,
+                    "The MCP declaration uses a schema dialect Ali cannot validate exactly and was withheld.",
                     invalidIndexes,
                     issues);
             }

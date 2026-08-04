@@ -33,7 +33,7 @@ public sealed class CompletionComposerTests
         };
         var bindings = Bindings("accepted");
         var composer = Composer(
-            Snapshot(client, profile),
+            Snapshot(client, profile, useNativeProtocol: false),
             bindings,
             (revision, _, _) => ValueTask.FromResult(
                 new AliCompletionDispatchAuthorization(true, revision)));
@@ -113,6 +113,11 @@ public sealed class CompletionComposerTests
         Assert.Equal(
             AliAnswerCompositionProtocol.ToolName,
             Assert.IsAssignableFrom<AIFunctionDeclaration>(Assert.Single(options.Tools!)).Name);
+        Assert.Equal(
+            AliOrchestrationProtocol.BuildTransportSchema().GetRawText(),
+            Assert.IsAssignableFrom<AIFunctionDeclaration>(Assert.Single(options.Tools!))
+                .JsonSchema.GetRawText());
+        Assert.Null(options.ResponseFormat);
         Assert.Equal(profile.OutputTokenLimit, options.MaxOutputTokens);
         Assert.True(Assert.IsType<bool>(options.AdditionalProperties![
             AliInternalModelRoutingProperties.SuppressInjectedPersona]));
@@ -306,7 +311,7 @@ public sealed class CompletionComposerTests
             Request("Return a complete answer."),
             TestContext.Current.CancellationToken);
 
-        Assert.Equal(2, client.CallCount);
+        Assert.Equal(1, client.CallCount);
         var failure = Assert.IsType<TemporaryCompletionFailure>(attempt.Failure);
         Assert.Equal(
             TemporaryCompletionFailureKind.CompletionOutputIncomplete,
@@ -390,8 +395,11 @@ public sealed class CompletionComposerTests
             malformedInput.GetProperty("projectionPage").GetProperty("pageDigest").GetString(),
             regeneratedInput.GetProperty("projectionPage").GetProperty("pageDigest").GetString());
         Assert.NotNull(client.Requests[0].Options!.Tools);
-        Assert.Null(client.Requests[1].Options!.Tools);
-        Assert.NotNull(client.Requests[1].Options!.ResponseFormat);
+        Assert.All(client.Requests, request =>
+        {
+            Assert.NotNull(request.Options!.Tools);
+            Assert.Null(request.Options.ResponseFormat);
+        });
     }
 
     [Fact]
@@ -412,9 +420,12 @@ public sealed class CompletionComposerTests
             TestContext.Current.CancellationToken);
 
         Assert.False(attempt.IsSuccessful);
-        Assert.Equal(3, client.CallCount);
-        Assert.NotNull(client.Requests[0].Options!.Tools);
-        Assert.All(client.Requests.Skip(1), request => Assert.Null(request.Options!.Tools));
+        Assert.Equal(2, client.CallCount);
+        Assert.All(client.Requests, request =>
+        {
+            Assert.NotNull(request.Options!.Tools);
+            Assert.Null(request.Options.ResponseFormat);
+        });
         Assert.Equal(
             TemporaryCompletionFailureKind.CompletionOutputIncomplete,
             Assert.IsType<TemporaryCompletionFailure>(attempt.Failure).Kind);
@@ -443,7 +454,7 @@ public sealed class CompletionComposerTests
             TestContext.Current.CancellationToken);
 
         Assert.False(attempt.IsSuccessful);
-        Assert.Equal(3, client.CallCount);
+        Assert.Equal(2, client.CallCount);
         Assert.Null(attempt.CommittedDraft);
         var failure = Assert.IsType<TemporaryCompletionFailure>(attempt.Failure);
         Assert.Contains("1 complete answer segment(s)", failure.UserVisibleMessage, StringComparison.Ordinal);
@@ -511,6 +522,33 @@ public sealed class CompletionComposerTests
         Assert.Equal(
             TemporaryCompletionFailureKind.CompletionOutputIncomplete,
             Assert.IsType<TemporaryCompletionFailure>(attempt.Failure).Kind);
+    }
+
+    [Fact]
+    public void CompatibilityDecoder_RejectsUnexpectedToolCallAlongsideValidPayload()
+    {
+        var message = new MeaiChatMessage(
+            MeaiChatRole.Assistant,
+            PlanningContractTests.TransportJson(
+                """
+                {
+                  "kind": "finishAnswer",
+                  "answerId": "answer-1"
+                }
+                """));
+        message.Contents.Add(new FunctionCallContent(
+            "unexpected-call",
+            AliAnswerCompositionProtocol.ToolName,
+            new Dictionary<string, object?>(StringComparer.Ordinal)));
+        var response = new ChatResponse(message)
+        {
+            FinishReason = ChatFinishReason.Stop
+        };
+
+        var decoded = AliAnswerCompositionDecoder.DecodeCompatibility(response);
+
+        Assert.False(decoded.IsSuccess);
+        Assert.Contains("unexpected tool call", decoded.Error, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -658,33 +696,52 @@ public sealed class CompletionComposerTests
     private static BoundModelDispatchSnapshot Snapshot(
         IChatClient client,
         ModelProfile profile,
-        string reasoningEffort = "low") =>
-        new(
+        string reasoningEffort = "low",
+        bool useNativeProtocol = true)
+    {
+        var exactProfile = profile with
+        {
+            ProtocolIdentity = useNativeProtocol
+                ? RuntimeProtocolIdentities.NativeOpenAiTools
+                : RuntimeProtocolIdentities.StructuredDecision
+        };
+        return new BoundModelDispatchSnapshot(
             client,
-            profile,
+            exactProfile,
             new BoundRuntimeBindingMaterial(
                 "test-provider",
                 "test-client",
-                profile.RuntimeKind,
-                profile.RuntimeLocation,
-                profile.RuntimeEndpoint),
+                exactProfile.RuntimeKind,
+                exactProfile.RuntimeLocation,
+                exactProfile.RuntimeEndpoint)
+            {
+                ProtocolIdentity = exactProfile.ProtocolIdentity,
+                CapabilityProfileIdentity = exactProfile.CapabilityProfileIdentity
+            },
             new BoundModelBindingMaterial(
-                profile.ProfileId,
-                profile.PackageId,
-                profile.Family,
-                profile.Size,
-                profile.Quantization,
-                profile.SupportsVision,
-                profile.SupportsToolCalls),
+                exactProfile.ProfileId,
+                exactProfile.PackageId,
+                exactProfile.Family,
+                exactProfile.Size,
+                exactProfile.Quantization,
+                exactProfile.SupportsVision,
+                exactProfile.SupportsToolCalls)
+            {
+                CapabilityProfileIdentity = exactProfile.CapabilityProfileIdentity
+            },
             new BoundGenerationSettingsBindingMaterial(
-                profile.ContextTokens,
-                profile.OutputTokenLimit,
-                profile.Temperature,
+                exactProfile.ContextTokens,
+                exactProfile.OutputTokenLimit,
+                exactProfile.Temperature,
                 0.9,
-                profile.StreamingEnabled,
+                exactProfile.StreamingEnabled,
                 "test-thinking",
                 true,
-                reasoningEffort));
+                reasoningEffort)
+            {
+                ProtocolIdentity = exactProfile.ProtocolIdentity
+            });
+    }
 
     private static TemporaryCompletionRequest Request(string immutableRequest)
     {
@@ -777,12 +834,15 @@ public sealed class CompletionComposerTests
             AliAnswerCompositionProtocol.ToolName,
             new Dictionary<string, object?>(StringComparer.Ordinal)
             {
-                ["kind"] = "appendSegment",
-                ["answerId"] = input.GetProperty("answerId").GetString(),
-                ["sequence"] = input.GetProperty("nextSequence").GetInt32(),
-                ["previousSegmentHash"] = input.GetProperty("previousSegmentHash").GetString(),
-                ["text"] = text,
-                ["coveredClaimIds"] = coveredClaimIds?.ToArray() ?? []
+                [AliOrchestrationProtocol.DecisionJsonPropertyName] = JsonSerializer.Serialize(new
+                {
+                    kind = "appendSegment",
+                    answerId = input.GetProperty("answerId").GetString(),
+                    sequence = input.GetProperty("nextSequence").GetInt32(),
+                    previousSegmentHash = input.GetProperty("previousSegmentHash").GetString(),
+                    text,
+                    coveredClaimIds = coveredClaimIds?.ToArray() ?? []
+                })
             }));
         return new ChatResponse(message) { FinishReason = ChatFinishReason.ToolCalls };
     }
@@ -795,8 +855,11 @@ public sealed class CompletionComposerTests
             AliAnswerCompositionProtocol.ToolName,
             new Dictionary<string, object?>(StringComparer.Ordinal)
             {
-                ["kind"] = "finishAnswer",
-                ["answerId"] = input.GetProperty("answerId").GetString()
+                [AliOrchestrationProtocol.DecisionJsonPropertyName] = JsonSerializer.Serialize(new
+                {
+                    kind = "finishAnswer",
+                    answerId = input.GetProperty("answerId").GetString()
+                })
             }));
         return new ChatResponse(message) { FinishReason = ChatFinishReason.ToolCalls };
     }
@@ -805,7 +868,7 @@ public sealed class CompletionComposerTests
         JsonElement input,
         string text,
         IReadOnlyList<string>? coveredClaimIds = null) =>
-        CompleteResponse(JsonSerializer.Serialize(new
+        CompleteResponse(PlanningContractTests.TransportJson(JsonSerializer.Serialize(new
         {
             kind = "appendSegment",
             answerId = input.GetProperty("answerId").GetString(),
@@ -813,14 +876,14 @@ public sealed class CompletionComposerTests
             previousSegmentHash = input.GetProperty("previousSegmentHash").GetString(),
             text,
             coveredClaimIds = coveredClaimIds?.ToArray() ?? []
-        }));
+        })));
 
     private static ChatResponse CompatibilityFinish(JsonElement input) =>
-        CompleteResponse(JsonSerializer.Serialize(new
+        CompleteResponse(PlanningContractTests.TransportJson(JsonSerializer.Serialize(new
         {
             kind = "finishAnswer",
             answerId = input.GetProperty("answerId").GetString()
-        }));
+        })));
 
     private sealed record RecordedCompositionRequest(
         IReadOnlyList<MeaiChatMessage> Messages,

@@ -154,6 +154,16 @@ public sealed class AliProductionCompositionIntegrationTests
             .Concat(frameworkTools)
             .OfType<AIFunctionDeclaration>()
             .ToArray();
+        var unsupportedSchemas = declarations
+            .Select(declaration =>
+            {
+                var accepted = CapabilityJsonSchemaValidator.TryValidateToolArgumentsSchema(
+                    declaration.JsonSchema,
+                    out var reason);
+                return (declaration.Name, Accepted: accepted, Reason: reason);
+            })
+            .Where(result => !result.Accepted)
+            .ToArray();
         var activeDeclarations = declarations
             .Where(declaration =>
                 !AliProductionCapabilityCatalog.IsRetiredToolName(declaration.Name))
@@ -163,6 +173,11 @@ public sealed class AliProductionCompositionIntegrationTests
         var production = AliProductionCapabilityCatalog.Build(activeDeclarations);
 
         Assert.Equal(119, declarations.Length);
+        Assert.True(
+            unsupportedSchemas.Length == 0,
+            string.Join(
+                Environment.NewLine,
+                unsupportedSchemas.Select(result => $"{result.Name}: {result.Reason}")));
         Assert.Equal(119, declarations.Select(tool => tool.Name).Distinct(StringComparer.Ordinal).Count());
         Assert.Equal(120, activeDeclarations.Length);
         Assert.Equal(120, production.Registry.Descriptors.Count);

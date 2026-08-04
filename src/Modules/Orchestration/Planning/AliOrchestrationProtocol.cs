@@ -7,16 +7,32 @@ namespace Ali.Modules.Orchestration.Planning;
 
 public static class AliOrchestrationProtocol
 {
+    public const string DecisionJsonPropertyName = "decisionJson";
+
     public static AIFunctionDeclaration CreateDeclaration(
         IEnumerable<AIFunctionDeclaration>? selectedTaskTools)
     {
-        var tools = SnapshotTools(selectedTaskTools);
+        _ = selectedTaskTools;
         var invariant = OrchestrationProtocolCapability.CreateInvariantFunction();
         return AIFunctionFactory.CreateDeclaration(
             invariant.Name,
-            invariant.Description,
-            BuildDecisionSchema(tools));
+            invariant.Description
+            + " The decisionJson argument contains the complete strict decision object as JSON text.",
+            BuildTransportSchema());
     }
+
+    public static JsonElement BuildTransportSchema() =>
+        JsonSerializer.SerializeToElement(ObjectSchema(
+            [DecisionJsonPropertyName],
+            new Dictionary<string, object?>
+            {
+                [DecisionJsonPropertyName] = new Dictionary<string, object?>
+                {
+                    ["type"] = "string",
+                    ["description"] =
+                        "The complete strict protocol payload serialized as one JSON object."
+                }
+            }));
 
     public static JsonElement BuildDecisionSchema(
         IEnumerable<AIFunctionDeclaration>? selectedTaskTools)

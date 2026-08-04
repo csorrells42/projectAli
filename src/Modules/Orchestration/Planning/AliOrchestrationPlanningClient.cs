@@ -273,7 +273,7 @@ internal sealed class AliOrchestrationPlanningClient : IChatClient
                     var failureFingerprint = FailureFingerprint(
                         useNative ? "native-transport" : "json-transport",
                         exception.GetType().FullName ?? exception.GetType().Name);
-                    if (useNative)
+                    if (useNative && dispatch.Bindings is null)
                     {
                         allowNativeProtocol = false;
                         continue;
@@ -314,13 +314,14 @@ internal sealed class AliOrchestrationPlanningClient : IChatClient
                         SafeResponseFingerprintMaterial(response),
                         decoded.Error ?? string.Empty);
                     invalidDraftCount++;
-                    if (useNative)
+                    if (useNative && dispatch.Bindings is null)
                     {
                         allowNativeProtocol = false;
                         continue;
                     }
 
-                    if (!compatibilityFailureFingerprints.Add(fingerprint)
+                    if (useNative
+                        || !compatibilityFailureFingerprints.Add(fingerprint)
                         || invalidDraftCount >= 4)
                     {
                         return await SuspendPlanningAsync(
@@ -349,13 +350,14 @@ internal sealed class AliOrchestrationPlanningClient : IChatClient
                         SafeResponseFingerprintMaterial(response),
                         string.Join("|", validation.Errors));
                     invalidDraftCount++;
-                    if (useNative)
+                    if (useNative && dispatch.Bindings is null)
                     {
                         allowNativeProtocol = false;
                         continue;
                     }
 
-                    if (!compatibilityFailureFingerprints.Add(fingerprint)
+                    if (useNative
+                        || !compatibilityFailureFingerprints.Add(fingerprint)
                         || invalidDraftCount >= 4)
                     {
                         return await SuspendPlanningAsync(
@@ -900,7 +902,7 @@ internal sealed class AliOrchestrationPlanningClient : IChatClient
 
         active.ApplySuspensionReceipt(receipt);
         var message = visibleMessage
-            ?? "Ali paused this turn because the local model did not return a valid orchestration decision in either supported protocol mode. The request was preserved and no rejected action ran.";
+            ?? "Ali paused this turn because the local model did not return a valid orchestration decision in the required orchestration protocol. The request was preserved and no rejected action ran.";
         var suspendedResponse = new ChatResponse(new ChatMessage(ChatRole.Assistant, message));
         if (source is not null)
         {

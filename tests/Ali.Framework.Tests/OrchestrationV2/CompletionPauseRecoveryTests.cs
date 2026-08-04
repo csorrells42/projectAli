@@ -11,6 +11,12 @@ public sealed class CompletionPauseRecoveryTests
 {
     [Theory]
     [InlineData(
+        AliPlanningInterimKind.ProtocolSuspended,
+        InterimPublicationReason.PlannerProtocolSuspended)]
+    [InlineData(
+        AliPlanningInterimKind.RuntimeSuspended,
+        InterimPublicationReason.RuntimeBindingsChanged)]
+    [InlineData(
         AliPlanningInterimKind.CompletionInputNotAdmitted,
         InterimPublicationReason.CompletionInputNotAdmitted)]
     [InlineData(
@@ -19,7 +25,7 @@ public sealed class CompletionPauseRecoveryTests
     [InlineData(
         AliPlanningInterimKind.CompletionOutputIncomplete,
         InterimPublicationReason.CompletionOutputIncomplete)]
-    public async Task TypedCompletionPause_SurvivesRestartAndExplicitSameSettingsResume(
+    public async Task TypedRecoverableRuntimePause_SurvivesRestartAndExplicitSameSettingsResume(
         AliPlanningInterimKind planningKind,
         InterimPublicationReason durableReason)
     {

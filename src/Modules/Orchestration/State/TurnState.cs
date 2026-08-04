@@ -57,7 +57,9 @@ internal static class InterimPublicationReasonPolicy
 {
     internal static bool IsModelConfigurationRecoverablePause(
         this InterimPublicationReason reason) =>
-        reason is InterimPublicationReason.ModelInputNotAdmitted
+        reason is InterimPublicationReason.PlannerProtocolSuspended
+            or InterimPublicationReason.RuntimeBindingsChanged
+            or InterimPublicationReason.ModelInputNotAdmitted
             or InterimPublicationReason.CompletionInputNotAdmitted
             or InterimPublicationReason.CompletionDispatchBindingsChanged
             or InterimPublicationReason.CompletionOutputIncomplete;

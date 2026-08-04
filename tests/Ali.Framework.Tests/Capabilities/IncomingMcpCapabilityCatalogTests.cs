@@ -3,6 +3,7 @@ using Ali.Modules.Mcp;
 using Ali.Modules.Permissions;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
+using System.Text.Json;
 
 namespace Ali.Framework.Tests.Capabilities;
 
@@ -158,6 +159,42 @@ public sealed class IncomingMcpCapabilityCatalogTests
                 || descriptor.ToolName == incomplete.Name
                 || descriptor.ToolName == firstCollision.Name
                 || descriptor.ToolName == drift.Name);
+    }
+
+    [Fact]
+    public async Task UnsupportedRemoteSchema_IsWithheldBeforeProjectionOrInvocation()
+    {
+        var template = Function("Unsupported", "read", static () => "must not run");
+        using var schemaDocument = JsonDocument.Parse(
+            """
+            {
+              "type": "object",
+              "properties": {
+                "value": { "type": "string" }
+              },
+              "not": { "required": ["value"] }
+            }
+            """);
+        var unsupported = new SchemaOverrideAIFunction(
+            template,
+            schemaDocument.RootElement);
+        var resolved = Resolved(unsupported, readOnly: true);
+        await using var session = Session([resolved]);
+
+        var discoveryAccepted = McpClientManager.TryValidateRemoteDeclaration(
+            unsupported,
+            out var discoveryReason);
+        var catalog = IncomingMcpCapabilityCatalog.Build(EmptyRegistry(), session);
+
+        Assert.False(discoveryAccepted);
+        Assert.Equal("unsupported schema dialect", discoveryReason);
+        Assert.Empty(catalog.Tools);
+        Assert.Contains(
+            catalog.Issues,
+            issue => issue.Code == IncomingMcpCapabilityIssueCode.UnsupportedSchemaDialect);
+        Assert.DoesNotContain(
+            catalog.Registry.Descriptors,
+            descriptor => string.Equals(descriptor.ToolName, unsupported.Name, StringComparison.Ordinal));
     }
 
     [Fact]
@@ -782,5 +819,12 @@ public sealed class IncomingMcpCapabilityCatalogTests
             DisposeCount++;
             return new ValueTask(_neverCompletes.Task);
         }
+    }
+
+    private sealed class SchemaOverrideAIFunction(
+        AIFunction inner,
+        JsonElement schema) : DelegatingAIFunction(inner)
+    {
+        public override JsonElement JsonSchema { get; } = schema.Clone();
     }
 }

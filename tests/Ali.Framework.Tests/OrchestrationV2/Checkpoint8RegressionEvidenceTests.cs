@@ -510,8 +510,10 @@ public sealed class Checkpoint8RegressionEvidenceTests
         "read_file",
         "Read a file by exact path.");
 
-    private static ChatResponse Compatibility(string json) =>
-        new(new ChatMessage(ChatRole.Assistant, json))
+    private static ChatResponse Compatibility(string decisionJson) =>
+        new(new ChatMessage(
+            ChatRole.Assistant,
+            PlanningContractTests.TransportJson(decisionJson)))
         {
             FinishReason = ChatFinishReason.Stop
         };

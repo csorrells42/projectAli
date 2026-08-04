@@ -137,7 +137,9 @@ public sealed class CompletionPublicationSafetyTests
             }
             """;
             using var plannerModel = new SingleResponseChatClient(
-                new ChatResponse(new MeaiChatMessage(MeaiChatRole.Assistant, decisionJson))
+                new ChatResponse(new MeaiChatMessage(
+                    MeaiChatRole.Assistant,
+                    PlanningContractTests.TransportJson(decisionJson)))
                 {
                     FinishReason = ChatFinishReason.Stop
                 });

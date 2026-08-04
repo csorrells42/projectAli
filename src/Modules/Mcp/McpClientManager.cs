@@ -1026,6 +1026,18 @@ public sealed class McpClientManager(string dataRoot)
             return false;
         }
 
+        if (!CapabilityJsonSchemaValidator.TryValidateToolArgumentsSchema(
+                tool.JsonSchema,
+                out _)
+            || (tool.ReturnJsonSchema is { } declaredReturnSchema
+                && !CapabilityJsonSchemaValidator.TryValidateSchemaDefinition(
+                    declaredReturnSchema,
+                    out _)))
+        {
+            reason = "unsupported schema dialect";
+            return false;
+        }
+
         reason = string.Empty;
         return true;
     }

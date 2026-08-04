@@ -37,7 +37,7 @@ public sealed class PlanningEvidenceAuthorityTests
             authoritativeWorkGraph: graph);
         const string candidateEvidenceId = "candidate-evidence";
         const string candidateWorkItemId = "candidate-work";
-        var response = Complete($$"""
+        var response = PlanningDecision($$"""
             {
               "workUpdate": {
                 "baseRevision": 7,
@@ -116,7 +116,7 @@ public sealed class PlanningEvidenceAuthorityTests
             Projection(outcomeEvidenceId, outcomeCanary, "outcome-1"),
             Projection(claimEvidenceId, claimCanary)
         };
-        var response = Complete($$"""
+        var response = PlanningDecision($$"""
             {
               "workUpdate": null,
               "materialClaims": [
@@ -227,7 +227,7 @@ public sealed class PlanningEvidenceAuthorityTests
         }
 
         var graph = new WorkGraphSnapshot(13, nodes.ToImmutable());
-        var response = Complete("""
+        var response = PlanningDecision("""
             {
               "workUpdate": null,
               "materialClaims": [],
@@ -313,6 +313,9 @@ public sealed class PlanningEvidenceAuthorityTests
         {
             FinishReason = ChatFinishReason.Stop
         };
+
+    private static ChatResponse PlanningDecision(string decisionJson) =>
+        Complete(PlanningContractTests.TransportJson(decisionJson));
 
     private sealed class RecordingEvidenceAuthority :
         IAliPlanningTransitionObserver,

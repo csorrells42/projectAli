@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text;
+using Ali.Modules.Capabilities;
 using Ali.Modules.Coordinator;
 using Ali.Modules.Orchestration;
 using Ali.Modules.Orchestration.Contracts;
@@ -437,12 +438,19 @@ public sealed class PlanningInputAdmissionTests
         Assert.Equal(attachmentBytes, Assert.IsType<DataContent>(attachments.Materialize().Single())
             .Data.ToArray());
 
-        var model = new CountingChatClient(new ChatResponse(new ChatMessage(
-            ChatRole.Assistant,
-            PlanningContractTests.DecisionJson(
-                "{\"kind\":\"answerDirectly\",\"answer\":\"Admitted after context expansion.\"}")))
+        var nativeDecision = PlanningContractTests.DecisionJson(
+            "{\"kind\":\"answerDirectly\",\"answer\":\"Admitted after context expansion.\"}");
+        var nativeMessage = new ChatMessage(ChatRole.Assistant, string.Empty);
+        nativeMessage.Contents.Add(new FunctionCallContent(
+            "call-admitted-after-context-expansion",
+            OrchestrationProtocolCapability.ToolName,
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                [AliOrchestrationProtocol.DecisionJsonPropertyName] = nativeDecision
+            }));
+        var model = new CountingChatClient(new ChatResponse(nativeMessage)
         {
-            FinishReason = ChatFinishReason.Stop
+            FinishReason = ChatFinishReason.ToolCalls
         });
         using var client = new AliOrchestrationPlanningClient(
             model,
@@ -462,10 +470,8 @@ public sealed class PlanningInputAdmissionTests
             new ChatOptions(),
             TestContext.Current.CancellationToken);
 
-        // The tool-capable profile tries the native protocol first. This scripted model
-        // deliberately returns compatibility JSON, so the accepted compatibility retry is
-        // the second and final request.
-        Assert.Equal(2, model.CallCount);
+        // The exact bound native profile stays on its one proven transport.
+        Assert.Equal(1, model.CallCount);
         Assert.Equal("Admitted after context expansion.", response.Text);
     }
 

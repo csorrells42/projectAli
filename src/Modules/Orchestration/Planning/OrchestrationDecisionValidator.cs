@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Collections.Immutable;
+using Ali.Modules.Capabilities;
 using Ali.Modules.Orchestration.Work;
 using Microsoft.Extensions.AI;
 
@@ -87,6 +88,11 @@ public sealed class OrchestrationDecisionValidator
     private const int MaximumClaimCharacters = 2_000;
     private const int MaximumDirectAnswerCharacters = 32_000;
     private const int MaximumActivityFieldCharacters = 1_000;
+    private const int MaximumWorkItems = 128;
+    private const int MaximumMaterialClaims = 128;
+    private const int MaximumIdentifierListItems = 256;
+    private const int MaximumCompletionBindings = 256;
+    private const int MaximumRequestedSections = 64;
     internal const int MaximumCompletionEvidenceProjections = 32;
     internal const int MaximumCompletionEvidenceProjectionCharacters = 48_000;
 
@@ -97,6 +103,12 @@ public sealed class OrchestrationDecisionValidator
         ArgumentNullException.ThrowIfNull(decision);
         ArgumentNullException.ThrowIfNull(context);
         var errors = new List<string>();
+        ValidateDecisionCardinality(decision, errors);
+        if (errors.Count > 0)
+        {
+            return new OrchestrationDecisionValidationResult(errors);
+        }
+
         var updatedWorkIds = new HashSet<string>(StringComparer.Ordinal);
         var claimIds = new HashSet<string>(StringComparer.Ordinal);
 
@@ -114,6 +126,90 @@ public sealed class OrchestrationDecisionValidator
             candidateWorkGraph,
             errors);
         return new OrchestrationDecisionValidationResult(errors);
+    }
+
+    private static void ValidateDecisionCardinality(
+        OrchestrationDecision decision,
+        List<string> errors)
+    {
+        if (decision.WorkUpdate is { } workUpdate)
+        {
+            ValidateMaximumCount(workUpdate.Items, MaximumWorkItems, "workUpdate.items", errors);
+            foreach (var item in workUpdate.Items.Take(MaximumWorkItems))
+            {
+                ValidateMaximumCount(
+                    item.DependencyIds,
+                    MaximumIdentifierListItems,
+                    $"workUpdate item '{item.WorkItemId}' dependencyIds",
+                    errors);
+                ValidateMaximumCount(
+                    item.EvidenceIds,
+                    MaximumIdentifierListItems,
+                    $"workUpdate item '{item.WorkItemId}' evidenceIds",
+                    errors);
+            }
+        }
+
+        ValidateMaximumCount(
+            decision.MaterialClaims,
+            MaximumMaterialClaims,
+            "materialClaims",
+            errors);
+        foreach (var claim in decision.MaterialClaims.Take(MaximumMaterialClaims))
+        {
+            ValidateMaximumCount(
+                claim.EvidenceIds,
+                MaximumIdentifierListItems,
+                $"material claim '{claim.ClaimId}' evidenceIds",
+                errors);
+        }
+
+        if (decision.NextAction is not BeginCompletionAction completion)
+        {
+            return;
+        }
+
+        var plan = completion.Plan;
+        ValidateMaximumCount(
+            plan.RequiredOutcomeIds,
+            MaximumIdentifierListItems,
+            "completion requiredOutcomeIds",
+            errors);
+        ValidateMaximumCount(
+            plan.RequiredClaimIds,
+            MaximumIdentifierListItems,
+            "completion requiredClaimIds",
+            errors);
+        ValidateMaximumCount(
+            plan.Bindings,
+            MaximumCompletionBindings,
+            "completion bindings",
+            errors);
+        foreach (var binding in plan.Bindings.Take(MaximumCompletionBindings))
+        {
+            ValidateMaximumCount(
+                binding.EvidenceIds,
+                MaximumIdentifierListItems,
+                $"completion binding '{binding.SubjectId}' evidenceIds",
+                errors);
+        }
+        ValidateMaximumCount(
+            plan.RequestedSections,
+            MaximumRequestedSections,
+            "completion requestedSections",
+            errors);
+    }
+
+    private static void ValidateMaximumCount<T>(
+        IReadOnlyCollection<T> values,
+        int maximum,
+        string owner,
+        List<string> errors)
+    {
+        if (values.Count > maximum)
+        {
+            errors.Add($"{owner} exceeds the bounded maximum of {maximum} items.");
+        }
     }
 
     private static void ValidateWorkUpdate(
@@ -480,7 +576,11 @@ public sealed class OrchestrationDecisionValidator
         }
 
         var arguments = JsonSerializer.SerializeToElement(call.Arguments);
-        ValidateJsonAgainstSchema(arguments, tool.JsonSchema, tool.JsonSchema, "CallTool.arguments", errors);
+        CapabilityJsonSchemaValidator.Validate(
+            arguments,
+            tool.JsonSchema,
+            "CallTool.arguments",
+            errors);
 
         if (candidateWorkGraph is null)
         {
@@ -802,208 +902,4 @@ public sealed class OrchestrationDecisionValidator
     private static bool BoundedText(string value, int maximumCharacters) =>
         !string.IsNullOrWhiteSpace(value) && value.Length <= maximumCharacters;
 
-    private static void ValidateJsonAgainstSchema(
-        JsonElement value,
-        JsonElement schema,
-        JsonElement rootSchema,
-        string path,
-        List<string> errors)
-    {
-        if (schema.ValueKind != JsonValueKind.Object)
-        {
-            errors.Add($"{path} has an invalid registered JSON schema.");
-            return;
-        }
-
-        if (schema.TryGetProperty("$ref", out var reference)
-            && reference.ValueKind == JsonValueKind.String)
-        {
-            if (!TryResolveLocalReference(rootSchema, reference.GetString(), out var referencedSchema))
-            {
-                errors.Add($"{path} uses an unresolved registered schema reference.");
-                return;
-            }
-
-            ValidateJsonAgainstSchema(value, referencedSchema, rootSchema, path, errors);
-            return;
-        }
-
-        if (schema.TryGetProperty("allOf", out var allOf) && allOf.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var branch in allOf.EnumerateArray())
-            {
-                ValidateJsonAgainstSchema(value, branch, rootSchema, path, errors);
-            }
-        }
-
-        if (schema.TryGetProperty("oneOf", out var oneOf) && oneOf.ValueKind == JsonValueKind.Array)
-        {
-            var validBranches = CountValidBranches(value, oneOf, rootSchema, path);
-            if (validBranches != 1)
-            {
-                errors.Add($"{path} must match exactly one registered schema branch.");
-                return;
-            }
-        }
-
-        if (schema.TryGetProperty("anyOf", out var anyOf) && anyOf.ValueKind == JsonValueKind.Array)
-        {
-            if (CountValidBranches(value, anyOf, rootSchema, path) == 0)
-            {
-                errors.Add($"{path} must match a registered schema branch.");
-                return;
-            }
-        }
-
-        if (schema.TryGetProperty("enum", out var enumValues)
-            && enumValues.ValueKind == JsonValueKind.Array
-            && !enumValues.EnumerateArray().Any(candidate => JsonElement.DeepEquals(candidate, value)))
-        {
-            errors.Add($"{path} is not one of the registered enum values.");
-        }
-
-        if (schema.TryGetProperty("const", out var constant) && !JsonElement.DeepEquals(constant, value))
-        {
-            errors.Add($"{path} does not match the registered constant.");
-        }
-
-        if (schema.TryGetProperty("type", out var typeElement))
-        {
-            if (!MatchesType(value, typeElement))
-            {
-                errors.Add($"{path} does not match the registered JSON type.");
-                return;
-            }
-        }
-
-        if (value.ValueKind == JsonValueKind.Object)
-        {
-            ValidateObject(value, schema, rootSchema, path, errors);
-        }
-        else if (value.ValueKind == JsonValueKind.Array
-                 && schema.TryGetProperty("items", out var itemSchema))
-        {
-            var index = 0;
-            foreach (var item in value.EnumerateArray())
-            {
-                ValidateJsonAgainstSchema(item, itemSchema, rootSchema, $"{path}[{index++}]", errors);
-            }
-        }
-    }
-
-    private static void ValidateObject(
-        JsonElement value,
-        JsonElement schema,
-        JsonElement rootSchema,
-        string path,
-        List<string> errors)
-    {
-        var required = schema.TryGetProperty("required", out var requiredElement)
-                       && requiredElement.ValueKind == JsonValueKind.Array
-            ? requiredElement.EnumerateArray()
-                .Where(item => item.ValueKind == JsonValueKind.String)
-                .Select(item => item.GetString() ?? string.Empty)
-                .ToHashSet(StringComparer.Ordinal)
-            : new HashSet<string>(StringComparer.Ordinal);
-        foreach (var requiredName in required)
-        {
-            if (!value.TryGetProperty(requiredName, out _))
-            {
-                errors.Add($"{path}.{requiredName} is required by the registered tool schema.");
-            }
-        }
-
-        var hasProperties = schema.TryGetProperty("properties", out var properties)
-                            && properties.ValueKind == JsonValueKind.Object;
-        var disallowAdditional = schema.TryGetProperty("additionalProperties", out var additional)
-                                 && additional.ValueKind == JsonValueKind.False;
-        foreach (var property in value.EnumerateObject())
-        {
-            if (hasProperties && properties.TryGetProperty(property.Name, out var propertySchema))
-            {
-                ValidateJsonAgainstSchema(
-                    property.Value,
-                    propertySchema,
-                    rootSchema,
-                    $"{path}.{property.Name}",
-                    errors);
-            }
-            else if (disallowAdditional)
-            {
-                errors.Add($"{path}.{property.Name} is not allowed by the registered tool schema.");
-            }
-        }
-    }
-
-    private static int CountValidBranches(
-        JsonElement value,
-        JsonElement branches,
-        JsonElement rootSchema,
-        string path)
-    {
-        var count = 0;
-        foreach (var branch in branches.EnumerateArray())
-        {
-            var branchErrors = new List<string>();
-            ValidateJsonAgainstSchema(value, branch, rootSchema, path, branchErrors);
-            if (branchErrors.Count == 0)
-            {
-                count++;
-            }
-        }
-
-        return count;
-    }
-
-    private static bool MatchesType(JsonElement value, JsonElement typeElement)
-    {
-        if (typeElement.ValueKind == JsonValueKind.Array)
-        {
-            return typeElement.EnumerateArray().Any(type => MatchesType(value, type));
-        }
-
-        if (typeElement.ValueKind != JsonValueKind.String)
-        {
-            return true;
-        }
-
-        return typeElement.GetString() switch
-        {
-            "object" => value.ValueKind == JsonValueKind.Object,
-            "array" => value.ValueKind == JsonValueKind.Array,
-            "string" => value.ValueKind == JsonValueKind.String,
-            "integer" => value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out _),
-            "number" => value.ValueKind == JsonValueKind.Number,
-            "boolean" => value.ValueKind is JsonValueKind.True or JsonValueKind.False,
-            "null" => value.ValueKind == JsonValueKind.Null,
-            _ => true
-        };
-    }
-
-    private static bool TryResolveLocalReference(
-        JsonElement rootSchema,
-        string? reference,
-        out JsonElement schema)
-    {
-        schema = default;
-        if (string.IsNullOrWhiteSpace(reference) || !reference.StartsWith("#/", StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        var current = rootSchema;
-        foreach (var encodedSegment in reference[2..].Split('/'))
-        {
-            var segment = encodedSegment.Replace("~1", "/", StringComparison.Ordinal)
-                .Replace("~0", "~", StringComparison.Ordinal);
-            if (current.ValueKind != JsonValueKind.Object
-                || !current.TryGetProperty(segment, out current))
-            {
-                return false;
-            }
-        }
-
-        schema = current;
-        return true;
-    }
 }

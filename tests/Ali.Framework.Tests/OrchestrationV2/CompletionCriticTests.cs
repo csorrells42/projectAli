@@ -20,7 +20,7 @@ namespace Ali.Framework.Tests.OrchestrationV2;
 public sealed class CompletionCriticTests
 {
     [Fact]
-    public async Task SinglePageReview_IsFreshNoToolStructuredAndForwardsExactReasoningEffort()
+    public async Task SinglePageReview_UsesExactCompactStructuredProtocolAndReasoningEffort()
     {
         var client = new RecordingChatClient(VerdictResponse(
             complete: true,
@@ -65,21 +65,55 @@ public sealed class CompletionCriticTests
         Assert.True(root.TryGetProperty("relevantCapabilities", out _));
 
         var options = Assert.IsType<ChatOptions>(request.Options);
-        Assert.Empty(options.Tools!);
+        Assert.Null(options.Tools);
         Assert.Equal(ChatToolMode.None, options.ToolMode);
         Assert.False(options.AllowMultipleToolCalls);
         Assert.Equal(profile.OutputTokenLimit, options.MaxOutputTokens);
         var responseFormat = Assert.IsType<ChatResponseFormatJson>(options.ResponseFormat);
         Assert.Equal(
-            AliCompletionCriticProtocol.JsonSchema.GetRawText(),
+            AliOrchestrationProtocol.BuildTransportSchema().GetRawText(),
             responseFormat.Schema!.Value.GetRawText());
         Assert.Equal(AliCompletionCriticProtocol.SchemaName, responseFormat.SchemaName);
+        Assert.Contains("decisionJson", request.Messages[0].Text!, StringComparison.Ordinal);
+        Assert.Contains("materialUnmetOutcomes", request.Messages[0].Text!, StringComparison.Ordinal);
         Assert.True(Assert.IsType<bool>(options.AdditionalProperties![
             AliInternalModelRoutingProperties.SuppressInjectedPersona]));
         Assert.Equal(
             "high",
             options.AdditionalProperties[
                 AliInternalModelRoutingProperties.BoundReasoningEffort]);
+    }
+
+    [Fact]
+    public async Task NativeReview_UsesOnlyExactCompactToolProtocol()
+    {
+        var client = new RecordingChatClient(NativeVerdictResponse(
+            complete: true,
+            basis: "The exact answer satisfies the material request."));
+        var profile = PlanningTestModelProfile.GptOss65K() with
+        {
+            ProtocolIdentity = RuntimeProtocolIdentities.NativeOpenAiTools
+        };
+        var critic = Critic(client, profile, Bindings("native"), reasoningEffort: "medium");
+        var prepared = Assert.IsType<AliCompletionCriticPreparedReview>(
+            (await critic.PrepareAsync(
+                Request(pages: ["The accepted answer."]),
+                TestContext.Current.CancellationToken)).PreparedReview);
+
+        var attempt = await critic.ReviewAsync(
+            prepared,
+            new TestReviewStore(new DurableBacking()),
+            TestContext.Current.CancellationToken);
+
+        Assert.True(attempt.IsSuccessful);
+        var options = Assert.IsType<ChatOptions>(Assert.Single(client.Requests).Options);
+        var tool = Assert.IsAssignableFrom<AIFunctionDeclaration>(Assert.Single(options.Tools!));
+        Assert.Equal(AliCompletionCriticProtocol.SchemaName, tool.Name);
+        Assert.Equal(
+            AliOrchestrationProtocol.BuildTransportSchema().GetRawText(),
+            tool.JsonSchema.GetRawText());
+        Assert.NotEqual(ChatToolMode.None, options.ToolMode);
+        Assert.Null(options.ResponseFormat);
     }
 
     [Fact]
@@ -264,7 +298,7 @@ public sealed class CompletionCriticTests
             Assert.NotNull(protocol);
             Assert.Equal(AliCompletionCriticProtocol.SchemaName, protocol!.Name);
             Assert.Equal(
-                AliCompletionCriticProtocol.JsonSchema.GetRawText(),
+                AliOrchestrationProtocol.BuildTransportSchema().GetRawText(),
                 protocol.JsonSchema.GetRawText());
         });
     }
@@ -323,8 +357,10 @@ public sealed class CompletionCriticTests
     [InlineData("{\"complete\":false,\"basis\":\"   \",\"materialUnmetOutcomes\":[\"x\"]}")]
     public void Decoder_RejectsMalformedOrInconsistentTypedVerdicts(string json)
     {
-        var decoded = AliCompletionCriticProtocol.Decode(new ChatResponse(
-            new MeaiChatMessage(MeaiChatRole.Assistant, json))
+        var decoded = AliCompletionCriticProtocol.DecodeCompatibility(new ChatResponse(
+            new MeaiChatMessage(
+                MeaiChatRole.Assistant,
+                PlanningContractTests.TransportJson(json)))
         {
             FinishReason = ChatFinishReason.Stop
         });
@@ -339,19 +375,54 @@ public sealed class CompletionCriticTests
     {
         var nonStop = new ChatResponse(new MeaiChatMessage(
             MeaiChatRole.Assistant,
-            "{\"complete\":true,\"basis\":\"ok\",\"materialUnmetOutcomes\":[]}"))
+            PlanningContractTests.TransportJson(
+                "{\"complete\":true,\"basis\":\"ok\",\"materialUnmetOutcomes\":[]}")))
         {
             FinishReason = ChatFinishReason.Length
         };
-        var toolMessage = new MeaiChatMessage(MeaiChatRole.Assistant, string.Empty);
+        var toolMessage = new MeaiChatMessage(
+            MeaiChatRole.Assistant,
+            PlanningContractTests.TransportJson(
+                "{\"complete\":true,\"basis\":\"ok\",\"materialUnmetOutcomes\":[]}"));
         toolMessage.Contents.Add(new FunctionCallContent("call-1", "not-allowed"));
         var toolCall = new ChatResponse(toolMessage)
         {
             FinishReason = ChatFinishReason.Stop
         };
 
-        Assert.False(AliCompletionCriticProtocol.Decode(nonStop).IsSuccess);
-        Assert.False(AliCompletionCriticProtocol.Decode(toolCall).IsSuccess);
+        Assert.False(AliCompletionCriticProtocol.DecodeCompatibility(nonStop).IsSuccess);
+        Assert.False(AliCompletionCriticProtocol.DecodeCompatibility(toolCall).IsSuccess);
+    }
+
+    [Fact]
+    public async Task UnsupportedBoundProtocol_IsRejectedBeforeAuthorizationOrModelCall()
+    {
+        var client = new RecordingChatClient(VerdictResponse(true, "must not run"));
+        var profile = PlanningTestModelProfile.GptOss65K() with
+        {
+            ProtocolIdentity = RuntimeProtocolIdentities.ChatOnly
+        };
+        var authorizationCalls = 0;
+        var critic = new AliCompletionCritic(
+            () => Snapshot(client, profile, "low"),
+            _ => Bindings("unsupported"),
+            (revision, _, _) =>
+            {
+                authorizationCalls++;
+                return ValueTask.FromResult(
+                    new AliCompletionDispatchAuthorization(true, revision));
+            });
+
+        var preparation = await critic.PrepareAsync(
+            Request(pages: ["The accepted answer."]),
+            TestContext.Current.CancellationToken);
+
+        Assert.False(preparation.IsSuccessful);
+        Assert.Equal(
+            AliCompletionCriticFailureKind.DispatchBindingsChanged,
+            Assert.IsType<AliCompletionCriticFailure>(preparation.Failure).Kind);
+        Assert.Equal(0, authorizationCalls);
+        Assert.Equal(0, client.CallCount);
     }
 
     [Fact]
@@ -518,7 +589,11 @@ public sealed class CompletionCriticTests
                 "test-client",
                 profile.RuntimeKind,
                 profile.RuntimeLocation,
-                profile.RuntimeEndpoint),
+                profile.RuntimeEndpoint)
+            {
+                ProtocolIdentity = profile.ProtocolIdentity,
+                CapabilityProfileIdentity = profile.CapabilityProfileIdentity
+            },
             new BoundModelBindingMaterial(
                 profile.ProfileId,
                 profile.PackageId,
@@ -526,7 +601,10 @@ public sealed class CompletionCriticTests
                 profile.Size,
                 profile.Quantization,
                 profile.SupportsVision,
-                profile.SupportsToolCalls),
+                profile.SupportsToolCalls)
+            {
+                CapabilityProfileIdentity = profile.CapabilityProfileIdentity
+            },
             new BoundGenerationSettingsBindingMaterial(
                 profile.ContextTokens,
                 profile.OutputTokenLimit,
@@ -535,7 +613,10 @@ public sealed class CompletionCriticTests
                 profile.StreamingEnabled,
                 "test-thinking",
                 true,
-                reasoningEffort));
+                reasoningEffort)
+            {
+                ProtocolIdentity = profile.ProtocolIdentity
+            });
 
     private static AliCompletionCriticRequest Request(
         long stateRevision = 17,
@@ -695,15 +776,36 @@ public sealed class CompletionCriticTests
         IReadOnlyList<string>? unmet = null) =>
         new(new MeaiChatMessage(
             MeaiChatRole.Assistant,
-            JsonSerializer.Serialize(new
+            PlanningContractTests.TransportJson(JsonSerializer.Serialize(new
             {
                 complete,
                 basis,
                 materialUnmetOutcomes = unmet ?? []
-            })))
+            }))))
         {
             FinishReason = ChatFinishReason.Stop
         };
+
+    private static ChatResponse NativeVerdictResponse(
+        bool complete,
+        string basis,
+        IReadOnlyList<string>? unmet = null)
+    {
+        var message = new MeaiChatMessage(MeaiChatRole.Assistant, string.Empty);
+        message.Contents.Add(new FunctionCallContent(
+            "critic-call-" + Guid.NewGuid().ToString("N"),
+            AliCompletionCriticProtocol.SchemaName,
+            new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                [AliOrchestrationProtocol.DecisionJsonPropertyName] = JsonSerializer.Serialize(new
+                {
+                    complete,
+                    basis,
+                    materialUnmetOutcomes = unmet ?? []
+                })
+            }));
+        return new ChatResponse(message) { FinishReason = ChatFinishReason.ToolCalls };
+    }
 
     private static AliCompletionCriticReviewIdentity IdentityForRules(string suffix)
     {

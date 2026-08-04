@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Ali.Modules.Orchestration.Planning;
 using Microsoft.Extensions.AI;
 
 namespace Ali.Modules.Orchestration.Completion;
@@ -58,10 +59,52 @@ internal static class AliCompletionCriticProtocol
     internal static AIFunctionDeclaration CreateAdmissionDeclaration() =>
         AIFunctionFactory.CreateDeclaration(
             SchemaName,
-            "Return the exact typed completion-critic verdict response.",
-            JsonSchema);
+            "Return one strict completion-critic verdict as JSON text in the decisionJson field.",
+            AliOrchestrationProtocol.BuildTransportSchema());
 
-    internal static AliCompletionCriticDecodeResult Decode(ChatResponse response)
+    internal static AliCompletionCriticDecodeResult DecodeNative(ChatResponse response)
+    {
+        ArgumentNullException.ThrowIfNull(response);
+        if (response.FinishReason != ChatFinishReason.ToolCalls)
+        {
+            return AliCompletionCriticDecodeResult.Failure(
+                "The completion critic did not return an explicit tool-calls finish reason.");
+        }
+
+        var calls = response.Messages
+            .SelectMany(static message => message.Contents)
+            .OfType<FunctionCallContent>()
+            .Where(static call => !call.InformationalOnly)
+            .ToArray();
+        if (calls.Length != 1
+            || !string.Equals(calls[0].Name, SchemaName, StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(calls[0].CallId))
+        {
+            return AliCompletionCriticDecodeResult.Failure(
+                "The completion critic did not return exactly one required verdict call.");
+        }
+
+        try
+        {
+            var transport = JsonSerializer.SerializeToElement(
+                calls[0].Arguments
+                ?? new Dictionary<string, object?>(StringComparer.Ordinal));
+            return AliJsonProtocolTransport.TryDecode(
+                transport,
+                "completion-critic",
+                out var payload,
+                out var error)
+                ? DecodePayload(payload)
+                : AliCompletionCriticDecodeResult.Failure(error);
+        }
+        catch (Exception exception) when (exception is JsonException or NotSupportedException)
+        {
+            return AliCompletionCriticDecodeResult.Failure(
+                "The completion critic verdict call was not valid JSON.");
+        }
+    }
+
+    internal static AliCompletionCriticDecodeResult DecodeCompatibility(ChatResponse response)
     {
         ArgumentNullException.ThrowIfNull(response);
         if (response.FinishReason != ChatFinishReason.Stop)
@@ -86,10 +129,10 @@ internal static class AliCompletionCriticProtocol
                 "The completion critic returned no verdict object.");
         }
 
-        if (text.Length > MaximumResponseCharacters)
+        if (text.Length > AliJsonProtocolTransport.MaximumEnvelopeCharacters)
         {
             return AliCompletionCriticDecodeResult.Failure(
-                "The completion critic verdict exceeded the bounded protocol size.");
+                "The completion critic transport exceeded the bounded protocol size.");
         }
 
         try
@@ -100,15 +143,34 @@ internal static class AliCompletionCriticProtocol
                 {
                     AllowTrailingCommas = false,
                     CommentHandling = JsonCommentHandling.Disallow,
-                    MaxDepth = 16
+                    MaxDepth = AliJsonProtocolTransport.MaximumJsonDepth
                 });
-            var root = document.RootElement;
-            if (root.ValueKind != JsonValueKind.Object)
-            {
-                return AliCompletionCriticDecodeResult.Failure(
-                    "The completion critic verdict must be one JSON object.");
-            }
+            return AliJsonProtocolTransport.TryDecode(
+                document.RootElement,
+                "completion-critic",
+                out var payload,
+                out var error)
+                ? DecodePayload(payload)
+                : AliCompletionCriticDecodeResult.Failure(error);
+        }
+        catch (JsonException exception)
+        {
+            return AliCompletionCriticDecodeResult.Failure(
+                "The completion critic response was not one valid JSON object: "
+                + exception.Message);
+        }
+    }
 
+    private static AliCompletionCriticDecodeResult DecodePayload(JsonElement root)
+    {
+        if (root.GetRawText().Length > MaximumResponseCharacters)
+        {
+            return AliCompletionCriticDecodeResult.Failure(
+                "The completion critic verdict exceeded the bounded protocol size.");
+        }
+
+        try
+        {
             var exactNames = root.EnumerateObject()
                 .Select(static property => property.Name)
                 .ToArray();
@@ -169,9 +231,7 @@ internal static class AliCompletionCriticProtocol
         }
         catch (JsonException exception)
         {
-            return AliCompletionCriticDecodeResult.Failure(
-                "The completion critic response was not one valid JSON object: "
-                + exception.Message);
+            return AliCompletionCriticDecodeResult.Failure(exception.Message);
         }
     }
 }

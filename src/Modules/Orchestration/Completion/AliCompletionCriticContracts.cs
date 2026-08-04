@@ -522,5 +522,6 @@ internal sealed record AliCompletionCriticPreparedReview(
     AliCompletionCriticReviewIdentity Identity,
     BoundModelDispatchSnapshot Dispatch,
     TurnRuntimeBindings DispatchBindings,
+    bool UseNativeProtocol,
     IReadOnlyList<IReadOnlyList<MeaiChatMessage>> PageAuditMessages,
     IReadOnlyList<MeaiChatMessage>? SinglePageFinalMessages);

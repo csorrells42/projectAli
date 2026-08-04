@@ -400,8 +400,17 @@ public sealed class PlanningClientTests
         Assert.Equal("read_file", call.Name);
         Assert.Equal(1, semantic.SelectCount);
         Assert.Equal(2, inner.Requests.Count);
-        Assert.DoesNotContain("\"toolName\":\"read_file\"", SchemaText(inner.Requests[0]), StringComparison.Ordinal);
-        Assert.Contains("\"toolName\"", SchemaText(inner.Requests[1]), StringComparison.Ordinal);
+        var transportSchema = AliOrchestrationProtocol.BuildTransportSchema().GetRawText();
+        Assert.Equal(transportSchema, SchemaText(inner.Requests[0]));
+        Assert.Equal(transportSchema, SchemaText(inner.Requests[1]));
+        Assert.DoesNotContain(
+            "\"toolName\":\"read_file\"",
+            MessageText(inner.Requests[0]),
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "\"toolName\":\"read_file\"",
+            MessageText(inner.Requests[1]),
+            StringComparison.Ordinal);
         Assert.Single(activity, item => item.ActivityKind == AgentActivityKind.ToolCall);
         Assert.True(turn.TryGetToolPlan(call.CallId, out var plan));
         Assert.NotNull(plan);
@@ -588,8 +597,10 @@ public sealed class PlanningClientTests
     {
         var decisionJson = PlanningContractTests.DecisionJson(
             "{\"kind\":\"answerDirectly\",\"answer\":\"Native protocol complete.\"}");
-        var arguments = JsonSerializer.Deserialize<Dictionary<string, object?>>(decisionJson)
-            ?? throw new InvalidDataException("The test decision did not deserialize.");
+        var arguments = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            [AliOrchestrationProtocol.DecisionJsonPropertyName] = decisionJson
+        };
         var message = new ChatMessage(ChatRole.Assistant, string.Empty);
         message.Contents.Add(new FunctionCallContent(
             "protocol-call",
@@ -652,6 +663,59 @@ public sealed class PlanningClientTests
             Assert.IsAssignableFrom<AIFunctionDeclaration>(nativeTools.Single()).Name);
         Assert.Null(inner.Requests[1].Options.Tools);
         Assert.NotNull(inner.Requests[1].Options.ResponseFormat);
+    }
+
+    [Fact]
+    public async Task ExactReplyConstraint_CannotReplaceTheMandatoryOuterProtocol()
+    {
+        const string rejectedCanary = "ORANGE_CANARY";
+        var plainResponse = new ChatResponse(
+            new ChatMessage(ChatRole.Assistant, rejectedCanary))
+        {
+            FinishReason = ChatFinishReason.Stop
+        };
+        var inner = new ScriptedChatClient(
+            plainResponse,
+            Compatibility(rejectedCanary),
+            Compatibility(rejectedCanary));
+        var observer = new RecordingTransitionObserver();
+        using var client = new AliOrchestrationPlanningClient(
+            inner,
+            () => true,
+            PlanningTestModelProfile.GptOss65K);
+        using var scope = client.BeginTurn(
+            CreateTurn($"Reply exactly {rejectedCanary}; do not call tools.", out _),
+            Input(),
+            observer);
+
+        var response = await client.GetResponseAsync(
+            [],
+            new ChatOptions(),
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(3, inner.Requests.Count);
+        Assert.NotNull(inner.Requests[0].Options.Tools);
+        Assert.All(inner.Requests.Skip(1), request =>
+        {
+            Assert.Null(request.Options.Tools);
+            Assert.NotNull(request.Options.ResponseFormat);
+        });
+        Assert.All(inner.Requests, request =>
+            Assert.Contains(
+                request.Messages,
+                message => message.Role == ChatRole.System
+                    && message.Text?.Contains(
+                        "mandatory response transport",
+                        StringComparison.Ordinal) == true));
+        Assert.Empty(observer.Decisions);
+        Assert.Empty(observer.Publications);
+        Assert.Equal(
+            "planner-protocol-invalid",
+            Assert.Single(observer.Suspensions).ReasonCode);
+        Assert.Equal(
+            AliPlanningInterimKind.ProtocolSuspended,
+            client.PreparedInterimResponse!.Kind);
+        Assert.DoesNotContain(rejectedCanary, response.Text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -998,11 +1062,16 @@ public sealed class PlanningClientTests
             activity.Add);
     }
 
-    private static ChatResponse Compatibility(string json) =>
-        new(new ChatMessage(ChatRole.Assistant, json))
+    private static ChatResponse Compatibility(string decisionJson) =>
+        new(new ChatMessage(
+            ChatRole.Assistant,
+            PlanningContractTests.TransportJson(decisionJson)))
         {
             FinishReason = ChatFinishReason.Stop
         };
+
+    private static string MessageText(RecordedRequest request) =>
+        string.Join("\n", request.Messages.Select(message => message.Text));
 
     private static string SchemaText(RecordedRequest request)
     {
