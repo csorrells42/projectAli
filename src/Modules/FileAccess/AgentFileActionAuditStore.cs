@@ -2,6 +2,8 @@ using System.Text.Json;
 using Ali.Modules.Coordinator;
 using Ali.Modules.UserMemory;
 using Microsoft.Agents.AI;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 
 #pragma warning disable MAAI001 // Agent Framework file-store API is intentionally adopted behind this module boundary.
 
@@ -76,6 +78,8 @@ public sealed class AuditedAgentFileStore(
     AgentFileStore inner,
     AgentFileActionAuditStore audit) : AgentFileStore
 {
+    private static readonly Lazy<IReadOnlyList<MetadataReference>> CoreSourceReferences =
+        new(CreateCoreSourceReferences, LazyThreadSafetyMode.ExecutionAndPublication);
     private static readonly string[] WriteToolNames =
     [
         AliCapabilityCatalog.FileWriteName,
@@ -111,6 +115,7 @@ public sealed class AuditedAgentFileStore(
     public override Task WriteAsync(string path, string content, CancellationToken cancellationToken = default) =>
         AuditAsync("write", path, async () =>
         {
+            await ValidateCoreSourceWriteAsync(path, content, cancellationToken).ConfigureAwait(false);
             await inner.WriteAsync(path, content, cancellationToken).ConfigureAwait(false);
             return true;
         }, cancellationToken);
@@ -195,6 +200,139 @@ public sealed class AuditedAgentFileStore(
         IReadOnlyCollection<FileSearchResult> matches => $"matches:{matches.Count}",
         _ => "completed"
     };
+
+    private async Task ValidateCoreSourceWriteAsync(
+        string path,
+        string postContent,
+        CancellationToken cancellationToken)
+    {
+        if (!AliCoreAssistantExecutionContext.IsActive || !IsProtectedSourcePath(path))
+        {
+            return;
+        }
+
+        var currentContent = await inner.ReadAsync(path, cancellationToken).ConfigureAwait(false);
+        if (currentContent is null)
+        {
+            return;
+        }
+
+        var turnBaseline = AliCoreAssistantExecutionContext.CaptureFileBaseline(path, currentContent);
+        if (turnBaseline.CharacterLength >= 256
+            && postContent.Length < turnBaseline.CharacterLength * 3L / 4L)
+        {
+            throw new InvalidDataException(
+                "The core assistant rejected edits that would cumulatively remove more than one quarter of the existing source file during this turn. "
+                + "Preserve the working source and make smaller targeted replacements, then build after each coherent batch.");
+        }
+
+        ValidateCoreCSharpEdit(path, currentContent, postContent, cancellationToken);
+    }
+
+    private static void ValidateCoreCSharpEdit(
+        string path,
+        string currentContent,
+        string postContent,
+        CancellationToken cancellationToken)
+    {
+        if (!System.IO.Path.GetExtension(path).Equals(".cs", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var currentErrors = CompileCoreSource(path, currentContent, cancellationToken);
+        var postErrors = CompileCoreSource(path, postContent, cancellationToken);
+        var remainingCurrentErrors = currentErrors
+            .GroupBy(DiagnosticFingerprint, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+        var introduced = new List<Diagnostic>();
+        foreach (var diagnostic in postErrors)
+        {
+            var fingerprint = DiagnosticFingerprint(diagnostic);
+            if (remainingCurrentErrors.TryGetValue(fingerprint, out var count) && count > 0)
+            {
+                remainingCurrentErrors[fingerprint] = count - 1;
+            }
+            else
+            {
+                introduced.Add(diagnostic);
+            }
+        }
+
+        if (introduced.Count == 0)
+        {
+            return;
+        }
+
+        var detail = string.Join(
+            " | ",
+            introduced.Take(6).Select(diagnostic =>
+                $"{diagnostic.Id}: {diagnostic.GetMessage()}"));
+        throw new InvalidDataException(
+            "Roslyn rejected the proposed source edit before disk mutation because it introduced compiler errors. "
+            + detail
+            + " Re-read the exact affected region and submit a corrected targeted edit.");
+    }
+
+    private static IReadOnlyList<Diagnostic> CompileCoreSource(
+        string path,
+        string content,
+        CancellationToken cancellationToken)
+    {
+        var syntaxTree = CSharpSyntaxTree.ParseText(
+            content,
+            path: path,
+            cancellationToken: cancellationToken);
+        return CSharpCompilation.Create(
+                "AliCoreSourcePreview",
+                [syntaxTree],
+                CoreSourceReferences.Value,
+                new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary))
+            .GetDiagnostics(cancellationToken)
+            .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
+            .ToArray();
+    }
+
+    private static string DiagnosticFingerprint(Diagnostic diagnostic) =>
+        diagnostic.Id + "\0" + diagnostic.GetMessage();
+
+    private static IReadOnlyList<MetadataReference> CreateCoreSourceReferences()
+    {
+        var trustedPlatformAssemblies = AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string;
+        if (string.IsNullOrWhiteSpace(trustedPlatformAssemblies))
+        {
+            return [MetadataReference.CreateFromFile(typeof(object).Assembly.Location)];
+        }
+
+        return trustedPlatformAssemblies
+            .Split(System.IO.Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+            .Where(File.Exists)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(path => MetadataReference.CreateFromFile(path))
+            .ToArray();
+    }
+
+    private static bool IsProtectedSourcePath(string path)
+    {
+        var extension = System.IO.Path.GetExtension(path);
+        return extension.Equals(".cs", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".xaml", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".csproj", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".fs", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".fsproj", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".vb", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".vbproj", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".cpp", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".c", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".h", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".hpp", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".js", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".jsx", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".ts", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".tsx", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".py", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".razor", StringComparison.OrdinalIgnoreCase);
+    }
 
     private void ReportCompleted<T>(string operation, T result)
     {

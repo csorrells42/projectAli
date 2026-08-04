@@ -81,6 +81,10 @@ internal sealed class AliDotNetProjectScaffolder
         if (success)
         {
             _projectTracker.RecordScaffold(project.PhysicalPath);
+            if (AliCoreAssistantExecutionContext.IsActive)
+            {
+                AliCoreAssistantExecutionContext.BindActiveProject(projectPath);
+            }
         }
         await WriteAuditAsync(
                 projectPath,

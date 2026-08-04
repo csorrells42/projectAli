@@ -76,6 +76,8 @@ internal sealed class AliFrameworkFileMutationTransaction
         byte[]? postimageBytes = null;
         try
         {
+            var protectsExistingSource = preimageBytes is not null
+                && IsProtectedSourceFile(resolved.PhysicalPath);
             var currentContent = preimageBytes is null
                 || string.Equals(
                     toolName,
@@ -87,6 +89,17 @@ internal sealed class AliFrameworkFileMutationTransaction
                 toolName,
                 arguments,
                 currentContent);
+            if (protectsExistingSource && currentContent is not null)
+            {
+                ValidateCoreMutationScope(
+                    toolName,
+                    arguments,
+                    currentContent,
+                    plan.PostContent,
+                    AliCoreAssistantExecutionContext.CaptureFileBaseline(
+                        resolved.PhysicalPath,
+                        currentContent));
+            }
             if (!string.Equals(plan.FileName, fileName, StringComparison.Ordinal))
             {
                 throw new InvalidDataException(
@@ -150,6 +163,72 @@ internal sealed class AliFrameworkFileMutationTransaction
         }
     }
 
+    private static bool IsProtectedSourceFile(string physicalPath)
+    {
+        var extension = Path.GetExtension(physicalPath);
+        return extension.Equals(".cs", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".xaml", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".csproj", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".fs", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".fsproj", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".vb", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".vbproj", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".cpp", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".c", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".h", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".hpp", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".js", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".jsx", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".ts", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".tsx", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".py", StringComparison.OrdinalIgnoreCase)
+            || extension.Equals(".razor", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void ValidateCoreMutationScope(
+        string toolName,
+        JsonElement arguments,
+        string currentContent,
+        string postContent,
+        CoreAssistantFileBaseline turnBaseline)
+    {
+        if (turnBaseline.CharacterLength >= 256
+            && postContent.Length < turnBaseline.CharacterLength * 3L / 4L)
+        {
+            throw new InvalidDataException(
+                "The core assistant rejected edits that would cumulatively remove more than one quarter of the file as it existed at the start of this turn. "
+                + "Preserve the working source and make smaller targeted replacements, then build after each coherent batch.");
+        }
+
+        if (string.Equals(toolName, AliCapabilityCatalog.FileReplaceName, StringComparison.Ordinal)
+            && arguments.TryGetProperty("oldString", out var oldStringElement)
+            && oldStringElement.ValueKind == JsonValueKind.String
+            && oldStringElement.GetString() is { } oldString)
+        {
+            var maximumReplacementCharacters = Math.Max(256, currentContent.Length / 3);
+            if (oldString.Length > maximumReplacementCharacters)
+            {
+                throw new InvalidDataException(
+                    "The core assistant rejected a replacement spanning more than one third of an existing file. "
+                    + "Replace one method or one small region at a time so unrelated working code remains intact.");
+            }
+        }
+
+        if (string.Equals(toolName, AliCapabilityCatalog.FileReplaceLinesName, StringComparison.Ordinal)
+            && arguments.TryGetProperty("edits", out var editsElement)
+            && editsElement.ValueKind == JsonValueKind.Array)
+        {
+            var lineCount = currentContent.Count(character => character == '\n') + 1;
+            var maximumEditedLines = Math.Max(8, (lineCount + 3) / 4);
+            if (editsElement.GetArrayLength() > maximumEditedLines)
+            {
+                throw new InvalidDataException(
+                    "The core assistant rejected a line edit touching more than one quarter of an existing file. "
+                    + "Apply a smaller coherent batch, re-read the changed region, and continue incrementally.");
+            }
+        }
+    }
+
     internal async Task PublishFrameworkWriteAsync(
         string path,
         string content,
@@ -159,11 +238,30 @@ internal sealed class AliFrameworkFileMutationTransaction
         ArgumentNullException.ThrowIfNull(content);
         cancellationToken.ThrowIfCancellationRequested();
         var resolved = _rawStore.ResolvePhysicalFilePath(path);
+        if (AliCoreAssistantExecutionContext.IsActive)
+        {
+            await ValidateCorePublishedMutationAsync(
+                    resolved.PhysicalPath,
+                    toolName: string.Empty,
+                    content,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            await _rawStore.WriteAsync(path, content, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
         if (!TryConsumeExactFileMutationGrant(out var grant) || grant is null)
         {
             throw new InvalidOperationException(
                 "A production Agent Framework file mutation requires one exact durable execution grant.");
         }
+
+        await ValidateCorePublishedMutationAsync(
+                resolved.PhysicalPath,
+                grant.ToolName,
+                content,
+                cancellationToken)
+            .ConfigureAwait(false);
 
         var changeSet = await _changeSets.LoadAsync(
                 grant.PreparationIdentity,
@@ -206,6 +304,47 @@ internal sealed class AliFrameworkFileMutationTransaction
             {
                 CryptographicOperations.ZeroMemory(frameworkBytes);
             }
+        }
+    }
+
+    private static async Task ValidateCorePublishedMutationAsync(
+        string physicalPath,
+        string toolName,
+        string postContent,
+        CancellationToken cancellationToken)
+    {
+        if (!AliCoreAssistantExecutionContext.IsActive
+            || !IsProtectedSourceFile(physicalPath))
+        {
+            return;
+        }
+
+        var currentBytes = await ReadOptionalExactFileAsync(
+                physicalPath,
+                cancellationToken)
+            .ConfigureAwait(false);
+        if (currentBytes is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var currentContent = DecodeFrameworkText(currentBytes);
+            var turnBaseline = AliCoreAssistantExecutionContext.CaptureFileBaseline(
+                physicalPath,
+                currentContent);
+            if (turnBaseline.CharacterLength >= 256
+                && postContent.Length < turnBaseline.CharacterLength * 3L / 4L)
+            {
+                throw new InvalidDataException(
+                    "The core assistant rejected edits that would cumulatively remove more than one quarter of the file as it existed at the start of this turn. "
+                    + "Preserve the working source and make smaller targeted replacements, then build after each coherent batch.");
+            }
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(currentBytes);
         }
     }
 

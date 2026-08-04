@@ -70,7 +70,6 @@ public sealed class MainWindowViewModel : ObservableObject
     private bool _visionInitializationStarted;
     private readonly SystemResourceMonitor _resourceMonitor = new();
     private readonly DispatcherTimer _resourceMeterTimer = new() { Interval = TimeSpan.FromSeconds(1) };
-    private readonly DispatcherTimer _modelStatusTimer = new() { Interval = TimeSpan.FromSeconds(30) };
     private readonly DispatcherTimer _stackHealthTimer = new() { Interval = TimeSpan.FromSeconds(30) };
     private string _conversationId = ConversationSessionFactory.StartFresh().ConversationId;
     private ConversationHistoryItemViewModel? _activeConversationHistoryItem;
@@ -396,8 +395,6 @@ public sealed class MainWindowViewModel : ObservableObject
         _resourceMeterTimer.Tick += (_, _) => RefreshResourceMeters();
         RefreshResourceMeters();
         _resourceMeterTimer.Start();
-        _modelStatusTimer.Tick += async (_, _) => await RefreshModelConnectionStatusAsync(showWaiting: false).ConfigureAwait(true);
-        _modelStatusTimer.Start();
         _stackHealthTimer.Tick += async (_, _) => await RefreshStackHealthAsync().ConfigureAwait(true);
         RefreshStackComponents();
         RefreshConversationHistory();
@@ -2230,7 +2227,6 @@ public sealed class MainWindowViewModel : ObservableObject
         {
             await Task.Run(interactionRuntime.Dispose).ConfigureAwait(true);
         }
-        _modelStatusTimer.Stop();
         _stackHealthTimer.Stop();
         SetModelConnectionStatus("disconnecting from local model", MediaBrushes.Gold);
         StatusText = "Disconnecting Ali from the local model runtime...";
@@ -7500,6 +7496,11 @@ public sealed class MainWindowViewModel : ObservableObject
     private async Task RefreshStackHealthAsync()
     {
         if (_checkingStackHealth || _lifetimeCancellation.IsCancellationRequested)
+        {
+            return;
+        }
+
+        if (IsBusy || IsRecording || IsTranscribing || IsSpeaking)
         {
             return;
         }

@@ -43,6 +43,7 @@ internal sealed class AliAgentHarnessRunner : IDisposable
     // Exact repeated tool/argument plans are stopped by the connector; this high
     // ceiling remains only as a final finite-run safety boundary.
     internal const int MaximumToolIterations = int.MaxValue;
+    private const int CoreToolIterationsPerBurst = 4;
     private static readonly IReadOnlySet<string> CoreRecoveryCSharpToolNames =
         new HashSet<string>(StringComparer.Ordinal)
         {
@@ -58,7 +59,29 @@ internal sealed class AliAgentHarnessRunner : IDisposable
     private static readonly IReadOnlySet<string> CoreRecoveryToolNames =
         new HashSet<string>(CoreRecoveryCSharpToolNames, StringComparer.Ordinal)
         {
-            AliCapabilityCatalog.SearchCurrentWebName
+            AliCapabilityCatalog.SearchCurrentWebName,
+            AliCapabilityCatalog.RecallUserMemoryName,
+            AliCapabilityCatalog.ListCurrentUserMemoriesName
+        };
+    private static readonly IReadOnlySet<string> CoreBehaviorRepairToolNames =
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+            AliCapabilityCatalog.FileReadName,
+            AliCapabilityCatalog.FileWriteName,
+            AliCapabilityCatalog.FileReplaceName,
+            AliCapabilityCatalog.FileReplaceLinesName,
+            AliCapabilityCatalog.RoslynAnalyzeProjectName,
+            AliCapabilityCatalog.RoslynFormatProjectName,
+            AliCapabilityCatalog.DotNetBuildName,
+            AliCapabilityCatalog.DotNetTestName,
+            AliCapabilityCatalog.DotNetRunName,
+            AliCapabilityCatalog.DotNetStopProjectName
+        };
+    private static readonly IReadOnlySet<string> CoreBehaviorRewriteToolNames =
+        new HashSet<string>(StringComparer.Ordinal)
+        {
+            AliCapabilityCatalog.FileReadName,
+            AliCapabilityCatalog.FileWriteName
         };
     private readonly IReadOnlyList<AITool> _baseTools;
     private readonly IReadOnlyList<AITool> _startupAssistantTools;
@@ -72,6 +95,8 @@ internal sealed class AliAgentHarnessRunner : IDisposable
     private readonly McpClientManager _mcpClients;
     private readonly AgentToolPermissionStore _toolPermissions;
     private readonly AliWorkstationFileAccess _fileAccess;
+    private readonly McpSourceFileTools _coreSourceFileTools;
+    private readonly IReadOnlyList<AITool> _coreFileTools;
     private readonly AliAgentWorkMemory _workMemory;
     private readonly IActiveUserSession? _activeUsers;
     private readonly Func<CoordinatorTurnContext?> _turnAccessor;
@@ -144,6 +169,9 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             resolvedDurableEffects);
         try
         {
+            _fileAccess = fileAccess;
+            _coreSourceFileTools = new McpSourceFileTools(_fileAccess);
+            _coreFileTools = CreateCoreFileTools(_coreSourceFileTools);
             _baseTools = catalog.Tools.ToArray();
             _protocolTool = OrchestrationProtocolCapability.CreateInvariantFunction();
             _startupAssistantTools = _baseTools
@@ -156,7 +184,6 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             _orchestrationSettings = orchestrationSettings().Normalize();
             _mcpClients = mcpClients;
             _toolPermissions = toolPermissions;
-            _fileAccess = fileAccess;
             _workMemory = workMemory;
             _activeUsers = activeUsers;
             _turnAccessor = turnAccessor;
@@ -333,7 +360,6 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         AgentOrchestrationSettings orchestrationSettings,
         TerminalCapabilityEnforcementProvider? capabilityEnforcementProvider = null,
         bool coreAssistantPath = false,
-        bool enableWorkspaceFiles = false,
         string? boundReasoningEffort = null)
     {
         ArgumentNullException.ThrowIfNull(profile);
@@ -382,18 +408,26 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             ? Math.Min(profile.ContextTokens, Math.Max(4_096, profile.ContextTokens / 4))
             : profile.ContextTokens;
         var harnessOutputTokens = coreAssistantPath
-            ? Math.Min(profile.OutputTokenLimit, Math.Max(512, harnessContextWindowTokens / 4))
+            ? Math.Min(profile.OutputTokenLimit, Math.Clamp(harnessContextWindowTokens / 4, 512, 2_048))
             : profile.OutputTokenLimit;
         if (harnessOutputTokens >= harnessContextWindowTokens)
         {
             harnessOutputTokens = Math.Max(1, harnessContextWindowTokens / 4);
         }
 
-        AIAgent agent = planningClient.AsHarnessAgent(new HarnessAgentOptions
+        var harnessClient = coreAssistantPath
+            ? new CoreAssistantContextCompactingChatClient(planningClient)
+            : planningClient;
+        AIAgent agent = harnessClient.AsHarnessAgent(new HarnessAgentOptions
         {
             Name = _assistantProfile.AssistantName,
             Description = "Local personal assistant with memory, current web, local library, reminders, identity, clock, private work memory, and approved workstation file tools.",
-            MaximumIterationsPerRequest = MaximumToolIterations,
+            // The outer core loop owns task completion and remains unbounded while
+            // work advances. Bound each Harness burst so repeated read-only calls
+            // return control to the completion gate instead of monopolizing a turn.
+            MaximumIterationsPerRequest = coreAssistantPath
+                ? CoreToolIterationsPerBurst
+                : MaximumToolIterations,
 #pragma warning disable MAAI001 // Agent Framework compaction controls are preview in Harness 1.15.
             // Local OpenAI-compatible runtimes can account Harmony/tool payloads much
             // more aggressively than the framework estimator. Compact the core loop
@@ -403,6 +437,10 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             MaxOutputTokens = harnessOutputTokens,
 #pragma warning restore MAAI001
             DisableWebSearch = true,
+            // The core assistant already owns its operating state and completion
+            // loop. Harness mode negotiation only adds mode_get/mode_set calls
+            // before useful work, so keep it entirely out of this hot path.
+            DisableAgentModeProvider = coreAssistantPath,
             // Ali's store already owns stable user/conversation isolation. Supplying the
             // provider explicitly prevents Harness from adding a random working folder
             // whose setup mutation would sit outside the exact durable tool-call grant.
@@ -410,16 +448,26 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             DisableAgentSkillsProvider = coreAssistantPath,
             AgentSkillsSource = skillsSource,
             DisableOpenTelemetry = coreAssistantPath,
+            // Core tools are already projected without approvals and execute only
+            // inside the validated Workspace scope. Avoid three redundant approval
+            // decorators on every model/tool round trip.
+            DisableToolAutoApproval = coreAssistantPath,
+            DisableApprovalNotRequiredFunctionBypassing = coreAssistantPath,
+            DisableApprovalResponseBinding = coreAssistantPath,
+            // CoreAssistantContextCompactingChatClient owns exact in-RAM compaction.
+            // A second Harness compaction provider duplicates work and context.
+            DisableCompaction = coreAssistantPath,
             OpenTelemetrySourceName = "ProjectAli.AgentFramework",
             // Ali already exposes live progress through CoordinatorTurnContext and keeps
             // private multi-step state in scoped file memory. Harness todo lists made the
             // model narrate an internal plan on ordinary turns and repeatedly surfaced an
             // unfinished list, so keep that overlapping provider out of the conversation.
             DisableTodoProvider = true,
-            FileAccessStore = !coreAssistantPath || enableWorkspaceFiles
-                ? _fileAccess.FrameworkStore
-                : null,
-            FileAccessProviderOptions = !coreAssistantPath || enableWorkspaceFiles
+            // The core path binds these functions directly into ChatOptions so its
+            // focused tool mode can filter and require them. The regular path retains
+            // the framework provider's dynamic injection.
+            FileAccessStore = coreAssistantPath ? null : _fileAccess.FrameworkStore,
+            FileAccessProviderOptions = !coreAssistantPath
                 ? new FileAccessProviderOptions
                 {
                     Instructions = _fileAccess.Instructions,
@@ -443,6 +491,40 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         return AliAgentFrameworkMiddleware.WithVisibleLifecycle(agent, _turnAccessor, "Ali");
     }
 
+    private static IReadOnlyList<AITool> CreateCoreFileTools(McpSourceFileTools provider)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        return
+        [
+            BindCoreFileTool(provider, nameof(McpSourceFileTools.ReadAsync),
+                AliCapabilityCatalog.FileReadName,
+                "Read one UTF-8 text file under Workspace."),
+            BindCoreFileTool(provider, nameof(McpSourceFileTools.WriteCoreAsync),
+                AliCapabilityCatalog.FileWriteName,
+                "Write the complete contents of one UTF-8 Workspace text file. Existing files are intentionally overwritten."),
+            BindCoreFileTool(provider, nameof(McpSourceFileTools.ReplaceAsync),
+                AliCapabilityCatalog.FileReplaceName,
+                "Replace exact ordinal text in one existing Workspace file.")
+        ];
+    }
+
+    private static AIFunction BindCoreFileTool(
+        McpSourceFileTools provider,
+        string methodName,
+        string toolName,
+        string description)
+    {
+        var method = typeof(McpSourceFileTools)
+            .GetMethods()
+            .Single(candidate => string.Equals(candidate.Name, methodName, StringComparison.Ordinal));
+        return AIFunctionFactory.Create(
+            method,
+            provider,
+            toolName,
+            description,
+            serializerOptions: null);
+    }
+
     private static string BuildCoreAssistantInstructions(string assistantName) =>
         $"You are {assistantName}, a truthful, reliable, fast personal and coding assistant. "
         + "Answer ordinary conversation directly and concisely. "
@@ -452,11 +534,234 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         + "A request is not impossible merely because it contains many requirements or needs many tool calls. Decompose large work into concrete steps and keep advancing through those steps in the same request. Do not apologize for scope or give up after inspection. "
         + "Before answering, account for every explicitly requested operation and report each operation's verified success, failure, or exact unresolved obstacle. "
         + "For C# creation, repair, build, test, launch, or stop requests, perform the requested Workspace operations with the available tools; pasted source or instructions are not a substitute for creating or changing the requested files. "
+        + "After dotnet_create_project succeeds, keep every source, XAML, project, build, and run operation under the exact project directory returned by that tool. Complete the requested multi-file implementation before attempting its first build. "
+        + "Use the newest installed supported .NET SDK for new projects. Never downgrade an existing TargetFramework unless the human explicitly requested that older compatibility target. "
+        + "A successful build proves compilation only. It does not satisfy an explicit request to implement or change source behavior; inspect the behavior, make the requested targeted source change, then rebuild and run when requested. "
         + "For existing source files, read only the line ranges needed and prefer targeted replace or replace-lines edits. Do not rewrite a whole existing source file with the write tool unless targeted edits have proved impossible; split genuinely large implementations into focused files. "
         + "Never claim that Workspace GUI launch is blocked by a sandbox. When dotnet_run_project is available and launch is requested, call it and report its exact result. Never claim build, test, or launch success unless the corresponding tool returned success for the final source. "
         + "Never pause merely because a tool or protocol response is imperfect; recover, choose another available tool, ask one necessary clarification, or explain the exact obstacle. "
         + "File operations must remain inside the approved workspace exposed by the file tools. "
         + AliToolCatalog.TypoInterpretationInstruction;
+
+    private static async Task<CoreAssistantCodingRequirements> ClassifyCoreCodingRequirementsAsync(
+        IChatClient chatClient,
+        IReadOnlyList<MeaiChatMessage> input,
+        CancellationToken cancellationToken)
+    {
+        var classifier = AIFunctionFactory.Create(
+            (
+                bool useWorkspaceTools,
+                bool useWebTools,
+                bool useMemoryTools,
+                bool requireWorkspaceMutation,
+                bool requireBuild,
+                bool requireRun) =>
+                CreateCoreRequirements(
+                    useWorkspaceTools,
+                    useWebTools,
+                    useMemoryTools,
+                    requireWorkspaceMutation,
+                    requireBuild,
+                    requireRun),
+            "open_core_tools",
+            "Open every core tool drawer and completion requirement needed to finish the entire human request, not merely its first planned step.");
+        var options = new ChatOptions
+        {
+            Instructions = string.Join(
+                Environment.NewLine,
+                "Answer ordinary conversation directly and concisely. Interpret the newest human turn semantically from the supplied recent conversation; never route by keywords.",
+                "Resolve references to prior conversation accurately. The newest human turn is the request to answer; phrases such as 'what did I just ask' refer to the preceding human turn, not to the current question itself.",
+                "If the request needs actual Workspace inspection, creation, editing, building, testing, running, or stopping, call open_core_tools with useWorkspaceTools true.",
+                "If a truthful answer depends on present or recently changing external facts, including current weather, call open_core_tools with useWebTools true.",
+                "If the request needs recall or listing of learned long-term memories, call open_core_tools with useMemoryTools true.",
+                "For Workspace work, set requireWorkspaceMutation for creation, editing, repair, or formatting; requireBuild for compile, build, test, run, or verification of created or repaired code; and requireRun for launch, run, open, or show requests.",
+                "Set requireWorkspaceMutation true whenever the requested outcome includes implementing, adding, removing, repairing, or changing source behavior. A project compiling successfully does not satisfy or erase an explicitly requested source change.",
+                "Every selection describes the entire requested outcome, not merely the first action you plan. If a request says inspect, then implement, then build and run, Workspace, mutation, build, and run are all required.",
+                "When tools are needed, call open_core_tools exactly once instead of answering or claiming inability."),
+            Tools = [classifier],
+            ToolMode = ChatToolMode.Auto,
+            AllowMultipleToolCalls = false,
+            MaxOutputTokens = 256,
+            AdditionalProperties = new AdditionalPropertiesDictionary
+            {
+                [AliInternalModelRoutingProperties.SuppressInjectedPersona] = true,
+                [AliInternalModelRoutingProperties.BoundReasoningEffort] = "low"
+            }
+        };
+        var response = await chatClient.GetResponseAsync(
+                input.TakeLast(6).ToArray(),
+                options,
+                cancellationToken)
+            .ConfigureAwait(false);
+        var call = FindClassifierCall(response, classifier.Name);
+        if (call is null)
+        {
+            var directAnswer = response.Text?.Trim() ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(directAnswer))
+            {
+                return new CoreAssistantCodingRequirements(
+                    RequiresWorkspaceWork: false,
+                    RequiresWorkspaceMutation: false,
+                    RequiresBuild: false,
+                    RequiresRun: false,
+                    RequiresCurrentWeb: false,
+                    RequiresMemoryRecall: false,
+                    Basis: "The model answered the ordinary conversation directly without opening a tool drawer.",
+                    DirectAnswer: directAnswer);
+            }
+
+            options.ToolMode = ChatToolMode.RequireSpecific(classifier.Name);
+            options.MaxOutputTokens = 512;
+            response = await chatClient.GetResponseAsync(
+                    input.TakeLast(6).ToArray(),
+                    options,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            call = FindClassifierCall(response, classifier.Name);
+            if (call is null)
+            {
+                return new CoreAssistantCodingRequirements(
+                    RequiresWorkspaceWork: false,
+                    RequiresWorkspaceMutation: false,
+                    RequiresBuild: false,
+                    RequiresRun: false,
+                    RequiresCurrentWeb: false,
+                    RequiresMemoryRecall: false,
+                    Basis: "The model did not return the required typed tool selection after one bounded retry.",
+                    DirectAnswer: "I could not start this request because the selected model did not return the required tool selection, even after one bounded retry. No tool ran and no file changed.");
+            }
+        }
+
+        return CreateCoreRequirements(
+            ReadBooleanArgument(call.Arguments, "useWorkspaceTools"),
+            ReadBooleanArgument(call.Arguments, "useWebTools"),
+            ReadBooleanArgument(call.Arguments, "useMemoryTools"),
+            ReadBooleanArgument(call.Arguments, "requireWorkspaceMutation"),
+            ReadBooleanArgument(call.Arguments, "requireBuild"),
+            ReadBooleanArgument(call.Arguments, "requireRun"));
+    }
+
+    private static FunctionCallContent? FindClassifierCall(ChatResponse response, string classifierName) =>
+        response.Messages
+            .SelectMany(message => message.Contents)
+            .OfType<FunctionCallContent>()
+            .FirstOrDefault(content =>
+                !content.InformationalOnly
+                && string.Equals(content.Name, classifierName, StringComparison.Ordinal));
+
+    private static CoreAssistantCodingRequirements CreateCoreRequirements(
+        bool workspace,
+        bool web,
+        bool memory,
+        bool mutation,
+        bool build,
+        bool run)
+    {
+        if (mutation || build || run)
+        {
+            workspace = true;
+        }
+        return new CoreAssistantCodingRequirements(
+            workspace,
+            mutation,
+            build,
+            run,
+            web,
+            memory,
+            "Model selected explicit core tool drawers and completion requirements.",
+            DirectAnswer: string.Empty);
+    }
+
+    private static bool ReadBooleanArgument(
+        IDictionary<string, object?>? arguments,
+        string name) =>
+        arguments is not null
+        && arguments.TryGetValue(name, out var value)
+        && value switch
+        {
+            bool boolean => boolean,
+            JsonElement { ValueKind: JsonValueKind.True } => true,
+            JsonElement { ValueKind: JsonValueKind.False } => false,
+            string text when bool.TryParse(text, out var parsed) => parsed,
+            _ => false
+        };
+
+    private static string ReadStringArgument(
+        IDictionary<string, object?>? arguments,
+        string name)
+    {
+        if (arguments is null || !arguments.TryGetValue(name, out var value))
+        {
+            return string.Empty;
+        }
+
+        return value switch
+        {
+            string text => text.Trim(),
+            JsonElement { ValueKind: JsonValueKind.String } element =>
+                element.GetString()?.Trim() ?? string.Empty,
+            _ => value?.ToString()?.Trim() ?? string.Empty
+        };
+    }
+
+    private static async Task<CoreAssistantOutcomeVerification> VerifyRequestedBehaviorAsync(
+        IChatClient chatClient,
+        string originalRequest,
+        string exactExecutionEvidence,
+        CancellationToken cancellationToken)
+    {
+        var verifier = AIFunctionFactory.Create(
+            (bool requestedBehaviorImplemented, string remainingWork) =>
+                new CoreAssistantOutcomeVerification(requestedBehaviorImplemented, remainingWork),
+            "confirm_requested_behavior",
+            "Confirm whether the exact source mutation evidence implements the requested source behavior. Return false with the concrete remaining work when it does not.");
+        var options = new ChatOptions
+        {
+            Instructions = string.Join(
+                Environment.NewLine,
+                "Judge only whether the requested source behavior is actually demonstrated by the exact mutation evidence.",
+                "A successful build or launch proves mechanics only and never proves that the requested behavior was implemented.",
+                "Do not infer changes absent from the evidence. An unrelated, empty, placeholder, or merely compiling file does not satisfy the request.",
+                "Call confirm_requested_behavior exactly once. Set requestedBehaviorImplemented true only when the evidence itself shows the requested behavior; otherwise set it false and state the smallest concrete source work still required."),
+            Tools = [verifier],
+            ToolMode = ChatToolMode.Auto,
+            AllowMultipleToolCalls = false,
+            MaxOutputTokens = 256,
+            AdditionalProperties = new AdditionalPropertiesDictionary
+            {
+                [AliInternalModelRoutingProperties.SuppressInjectedPersona] = true,
+                [AliInternalModelRoutingProperties.BoundReasoningEffort] = "low"
+            }
+        };
+        var response = await chatClient.GetResponseAsync(
+                [
+                    new MeaiChatMessage(
+                        MeaiChatRole.User,
+                        "Original request:" + Environment.NewLine + originalRequest
+                        + Environment.NewLine + Environment.NewLine
+                        + "Exact in-memory execution evidence:" + Environment.NewLine
+                        + exactExecutionEvidence)
+                ],
+                options,
+                cancellationToken)
+            .ConfigureAwait(false);
+        var call = response.Messages
+            .SelectMany(message => message.Contents)
+            .OfType<FunctionCallContent>()
+            .FirstOrDefault(content =>
+                !content.InformationalOnly
+                && string.Equals(content.Name, verifier.Name, StringComparison.Ordinal));
+        if (call is null)
+        {
+            return new CoreAssistantOutcomeVerification(
+                Implemented: false,
+                RemainingWork: "The semantic completion check returned no typed decision. Re-read the affected source and perform a concrete targeted edit that visibly implements the requested behavior.");
+        }
+
+        return new CoreAssistantOutcomeVerification(
+            ReadBooleanArgument(call.Arguments, "requestedBehaviorImplemented"),
+            ReadStringArgument(call.Arguments, "remainingWork"));
+    }
 
     private CapabilityRuntimeStateSnapshot CaptureCapabilityRuntimeState(string dataRoot)
     {
@@ -860,49 +1165,82 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         CancellationToken cancellationToken)
     {
         var input = BuildInitialInput(history, userText, attachments).ToList();
-        var availableDeclarations = _startupAssistantTools
-            .OfType<AIFunctionDeclaration>()
-            .Where(tool => CoreRecoveryToolNames.Contains(tool.Name))
-            .ToArray();
-        var semanticSelection = await _semanticToolCatalog.SelectAsync(
-                userText,
-                availableDeclarations,
-                [AliCapabilityCatalog.SearchCurrentWebName],
+        var dispatch = CaptureBoundModelDispatch();
+        var requirements = await ClassifyCoreCodingRequirementsAsync(
+                dispatch.ChatClient,
+                input,
                 cancellationToken)
             .ConfigureAwait(false);
-        turn.Report(
-            semanticSelection.RequiresAttention
-                ? AgentActivityKind.Warning
-                : AgentActivityKind.Status,
-            semanticSelection.RequiresAttention
-                ? "Core tool selection degraded"
-                : "Core tools ready",
-            semanticSelection.Status
-            + " Loaded: "
-            + (semanticSelection.Tools.Count == 0
-                ? "none"
-                : string.Join(", ", semanticSelection.Tools.Select(tool => tool.Name))));
-        var selectedNames = ResolveCoreToolNames(semanticSelection, out var recoverySuiteLoaded);
-        var completionGate = new CoreAssistantCompletionGate();
-        if (recoverySuiteLoaded)
+        if (!requirements.RequiresWorkspaceWork
+            && !requirements.RequiresWorkspaceMutation
+            && !requirements.RequiresBuild
+            && !requirements.RequiresRun
+            && !requirements.RequiresCurrentWeb
+            && !requirements.RequiresMemoryRecall
+            && !string.IsNullOrWhiteSpace(requirements.DirectAnswer))
         {
-            turn.Report(
-                AgentActivityKind.Warning,
-                "Core recovery tools ready",
-                "Semantic selection was degraded or supplied no usable core tool. "
-                + "Ali retained that selection and loaded the bounded Workspace C# recovery suite: "
-                + string.Join(", ", CoreRecoveryToolNames.Order(StringComparer.Ordinal)));
+            var directAnswer = FinalAnswerRenderer.Compose(
+                requirements.DirectAnswer.Trim(),
+                turn.WebSources);
+            var directPublication = new FinalAnswerPublication(
+                turn.ConversationId,
+                turn.UserMessageId,
+                turn.AssistantMessageId,
+                "publication_" + turn.AssistantMessageId,
+                directAnswer,
+                TurnStateIntegrity.Digest(directAnswer),
+                EvidenceStatus.Unverified,
+                ChatFinishReason.Stop.ToString());
+            var directAcknowledgment = await publishFinal(
+                    directPublication,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            FinalAnswerPublicationBoundary.RequireExactInMemoryAcknowledgment(
+                directPublication,
+                directAcknowledgment);
+            return new AgentHarnessRunResult(
+                WroteAnswer: true,
+                FinishReason: ChatFinishReason.Stop.ToString(),
+                Paused: false,
+                ResumeIdentity: null,
+                CompletedSuccessfully: true);
         }
+        var selectedNames = new HashSet<string>(StringComparer.Ordinal);
+        if (requirements.RequiresWorkspaceWork)
+        {
+            selectedNames.UnionWith(CoreRecoveryCSharpToolNames);
+        }
+        if (requirements.RequiresCurrentWeb)
+        {
+            selectedNames.Add(AliCapabilityCatalog.SearchCurrentWebName);
+        }
+        if (requirements.RequiresMemoryRecall)
+        {
+            selectedNames.Add(AliCapabilityCatalog.RecallUserMemoryName);
+            selectedNames.Add(AliCapabilityCatalog.ListCurrentUserMemoriesName);
+        }
+        var completionGate = new CoreAssistantCompletionGate();
+        completionGate.Require(requirements);
 
+        var enableWorkspaceFiles = selectedNames.Overlaps(CoreRecoveryCSharpToolNames);
         var activeTools = _startupAssistantTools
             .Where(tool => tool is AIFunctionDeclaration function
                 && selectedNames.Contains(function.Name))
             .Select(tool => tool is CapabilityPermissionProjectionAIFunction permissionProjection
                 ? (AITool)permissionProjection.ProjectWithoutApproval()
                 : tool)
+            .Concat(enableWorkspaceFiles ? _coreFileTools : [])
             .ToArray();
-        var enableWorkspaceFiles = selectedNames.Overlaps(CoreRecoveryCSharpToolNames);
-        var dispatch = CaptureBoundModelDispatch();
+        turn.Report(
+            AgentActivityKind.Status,
+            "Core tools ready",
+            requirements.Basis
+            + " Loaded: "
+            + (activeTools.Length == 0
+                ? "none"
+                : string.Join(", ", activeTools
+                    .OfType<AIFunctionDeclaration>()
+                    .Select(tool => tool.Name))));
         var activeAgent = CreateAgent(
             dispatch.ChatClient,
             dispatch.Profile,
@@ -910,7 +1248,6 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             _orchestrationSettings,
             capabilityEnforcementProvider: null,
             coreAssistantPath: true,
-            enableWorkspaceFiles: enableWorkspaceFiles,
             boundReasoningEffort: dispatch.GenerationSettingsBinding.ReasoningEffort);
         var session = await activeAgent.CreateSessionAsync(cancellationToken).ConfigureAwait(false);
         string? finishReason = null;
@@ -918,6 +1255,14 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         var pendingShadowCalls = new PendingShadowCallTracker();
         var pendingStandingPermissions = new PendingStandingPermissionTracker();
         string? lastBlockedFingerprint = null;
+        long lastBlockedSourceRevision = -1;
+        var finalWorkspaceReportRequested = false;
+        long behaviorVerifiedRevision = -1;
+        long lastRejectedBehaviorRevision = -1;
+        var repeatedBehaviorRepairAttempts = 0;
+        var behaviorRepairFocused = false;
+        var behaviorFullRewriteFocused = false;
+        string? requiredFocusedToolName = null;
         var completedSuccessfully = true;
         using var coreExecutionScope = AliCoreAssistantExecutionContext.Enter();
 
@@ -926,6 +1271,14 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             while (true)
             {
                 ToolApprovalRequestContent? approvalRequest = null;
+                using var focusedTools = CoreAssistantContextCompactingChatClient.FocusTools(
+                    behaviorFullRewriteFocused
+                        ? CoreBehaviorRewriteToolNames
+                        : behaviorRepairFocused
+                            ? CoreBehaviorRepairToolNames
+                            : null,
+                    requiredFocusedToolName);
+                requiredFocusedToolName = null;
                 await foreach (var update in activeAgent.RunStreamingAsync(
                                    input,
                                    session,
@@ -963,7 +1316,14 @@ internal sealed class AliAgentHarnessRunner : IDisposable
                                     turn,
                                     pendingShadowCalls,
                                     functionResult);
-                                if (ShouldReportGenericReturnedResult(functionResult))
+                                if (functionResult.Exception is not null)
+                                {
+                                    turn.Report(
+                                        AgentActivityKind.Error,
+                                        "Tool failed; Ali is repairing the exact error",
+                                        functionResult.Exception.GetBaseException().Message);
+                                }
+                                else if (ShouldReportGenericReturnedResult(functionResult))
                                 {
                                     turn.Report(
                                         AgentActivityKind.ToolResult,
@@ -980,20 +1340,109 @@ internal sealed class AliAgentHarnessRunner : IDisposable
 
                 if (approvalRequest is null)
                 {
+                    if (completionGate.RequiresRequestedBehaviorVerification
+                        && behaviorVerifiedRevision != completionGate.SourceRevision)
+                    {
+                        var behaviorCheck = await VerifyRequestedBehaviorAsync(
+                                dispatch.ChatClient,
+                                userText,
+                                completionGate.BuildVerifiedCompletionEvidence(),
+                                cancellationToken)
+                            .ConfigureAwait(false);
+                        if (!behaviorCheck.Implemented)
+                        {
+                            renderedAnswer.Clear();
+                            finalWorkspaceReportRequested = false;
+                            var repeatedWithoutMutation =
+                                lastRejectedBehaviorRevision == completionGate.SourceRevision;
+                            if (repeatedWithoutMutation)
+                            {
+                                repeatedBehaviorRepairAttempts++;
+                                if (repeatedBehaviorRepairAttempts > 1)
+                                {
+                                    turn.Report(
+                                        AgentActivityKind.Error,
+                                        "Workspace behavior repair stopped after no progress",
+                                        "A targeted edit and one forced complete-file write both returned without a successful source revision. Ali is reporting the exact obstacle instead of repeating the same failed mutation indefinitely.");
+                                    renderedAnswer.Append(
+                                        "I could not finish the requested source behavior because repeated mutation attempts returned without changing the Workspace source. The project was not built or launched, so I will not claim that it works.");
+                                    completedSuccessfully = false;
+                                    finalWorkspaceReportRequested = true;
+                                    break;
+                                }
+
+                                behaviorFullRewriteFocused = true;
+                            }
+                            else
+                            {
+                                repeatedBehaviorRepairAttempts = 0;
+                                behaviorFullRewriteFocused = false;
+                            }
+                            lastRejectedBehaviorRevision = completionGate.SourceRevision;
+                            behaviorRepairFocused = true;
+                            turn.Report(
+                                AgentActivityKind.Warning,
+                                "Requested behavior is not implemented yet",
+                                string.IsNullOrWhiteSpace(behaviorCheck.RemainingWork)
+                                    ? "The exact source-edit evidence does not yet demonstrate the requested behavior."
+                                    : behaviorCheck.RemainingWork);
+                            input =
+                            [
+                                new MeaiChatMessage(
+                                    MeaiChatRole.User,
+                                    "The independent semantic completion check rejected the current implementation. "
+                                    + (string.IsNullOrWhiteSpace(behaviorCheck.RemainingWork)
+                                        ? "The exact source-edit evidence does not demonstrate the requested behavior."
+                                        : behaviorCheck.RemainingWork)
+                                    + " Do not build or answer yet. Re-read the exact relevant source. "
+                                    + (repeatedWithoutMutation
+                                        ? "The targeted edit returned without changing the source. Read the exact file once if needed, then use file_access_write to replace the complete relevant source file with the finished implementation. Do not describe or recheck the same unchanged state. "
+                                        : "Make a targeted source change that implements the original request. ")
+                                    + "Finish the requested multi-file implementation before rebuilding and running the final project as requested.")
+                            ];
+                            continue;
+                        }
+
+                        behaviorVerifiedRevision = completionGate.SourceRevision;
+                        behaviorRepairFocused = false;
+                        behaviorFullRewriteFocused = false;
+                    }
+
                     if (completionGate.TryGetBlocker(out var blocker))
                     {
                         renderedAnswer.Clear();
+                        var startFocusedMutationRepair =
+                            requirements.RequiresWorkspaceMutation
+                            && completionGate.SourceRevision == 0
+                            && !behaviorRepairFocused;
                         if (string.Equals(
                             lastBlockedFingerprint,
                             blocker.Fingerprint,
-                            StringComparison.Ordinal))
+                            StringComparison.Ordinal)
+                            && lastBlockedSourceRevision == completionGate.SourceRevision)
                         {
-                            completedSuccessfully = false;
-                            renderedAnswer.Append(blocker.TruthfulFailureAnswer);
-                            break;
+                            if (!startFocusedMutationRepair)
+                            {
+                                turn.Report(
+                                    AgentActivityKind.Error,
+                                    "Workspace work stopped after no progress",
+                                    "Two bounded tool passes returned the same unresolved state without a successful source change. Ali is reporting the exact obstacle instead of looping.");
+                                renderedAnswer.Append(blocker.TruthfulFailureAnswer);
+                                completedSuccessfully = false;
+                                finalWorkspaceReportRequested = true;
+                                break;
+                            }
+
+                            turn.Report(
+                                AgentActivityKind.Warning,
+                                "Focusing on the required source change",
+                                "Ali is retaining the exact request and current source evidence while narrowing the next pass to read, mutation, Roslyn, build, test, and run tools.");
                         }
 
+                        behaviorRepairFocused |= startFocusedMutationRepair;
+                        requiredFocusedToolName = RequiredCoreToolFor(blocker);
                         lastBlockedFingerprint = blocker.Fingerprint;
+                        lastBlockedSourceRevision = completionGate.SourceRevision;
                         turn.Report(
                             AgentActivityKind.Warning,
                             "Continuing unfinished Workspace work",
@@ -1003,6 +1452,27 @@ internal sealed class AliAgentHarnessRunner : IDisposable
                             new MeaiChatMessage(
                                 MeaiChatRole.User,
                                 blocker.ContinuationInstruction)
+                        ];
+                        continue;
+                    }
+
+                    if (requirements.RequiresWorkspaceWork
+                        && !finalWorkspaceReportRequested)
+                    {
+                        finalWorkspaceReportRequested = true;
+                        renderedAnswer.Clear();
+                        input =
+                        [
+                            new MeaiChatMessage(
+                                MeaiChatRole.User,
+                                "All mechanically required Workspace operations now have successful current tool evidence. "
+                                + "Before finishing, answer the original request completely and truthfully. State the exact source behavior changed, the exact build result, and the exact run result when each was requested. "
+                                + "Do not report only the last tool call and do not claim any outcome absent from returned tool evidence. Original request: "
+                                + userText
+                                + Environment.NewLine
+                                + "Authoritative in-memory execution evidence:"
+                                + Environment.NewLine
+                                + completionGate.BuildVerifiedCompletionEvidence())
                         ];
                         continue;
                     }
@@ -1024,6 +1494,15 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             {
                 throw new InvalidOperationException(
                     "The model returned no answer and no further tool action.");
+            }
+            if (requirements.RequiresWorkspaceWork)
+            {
+                modelAnswer = modelAnswer.TrimEnd()
+                    + Environment.NewLine
+                    + Environment.NewLine
+                    + "Verified execution evidence:"
+                    + Environment.NewLine
+                    + completionGate.BuildVerifiedCompletionEvidence();
             }
             var exactAnswer = FinalAnswerRenderer.Compose(
                 modelAnswer,
@@ -1059,6 +1538,20 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             pendingStandingPermissions.Clear();
         }
     }
+
+    private static string? RequiredCoreToolFor(CoreAssistantCompletionBlocker blocker) =>
+        blocker.Code switch
+        {
+            "workspace-mutation-not-started" =>
+                AliCapabilityCatalog.FileReplaceName,
+            "workspace-mutation-failed" =>
+                AliCapabilityCatalog.FileWriteName,
+            "build-missing-or-stale" or "required-build-missing" =>
+                AliCapabilityCatalog.DotNetBuildName,
+            "run-missing-or-stale" or "required-run-missing" =>
+                AliCapabilityCatalog.DotNetRunName,
+            _ => null
+        };
 
     internal static IReadOnlySet<string> ResolveCoreToolNames(
         SemanticToolSelection semanticSelection,
@@ -2700,6 +3193,10 @@ internal sealed class AliAgentHarnessRunner : IDisposable
 
     private sealed record PendingApproval(TaskCompletionSource<AgentToolApprovalChoice> Completion);
 }
+
+internal readonly record struct CoreAssistantOutcomeVerification(
+    bool Implemented,
+    string RemainingWork);
 
 internal enum PendingStandingPermissionCompletionStatus
 {

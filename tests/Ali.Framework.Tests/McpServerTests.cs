@@ -767,6 +767,85 @@ public sealed class McpServerTests
     }
 
     [Fact]
+    public async Task SourceFileReplace_QuotedVirtualPathIsNormalized()
+    {
+        var root = CreateTemporaryRoot();
+        try
+        {
+            var tools = new McpSourceFileTools(CreateFileAccess(root));
+            var path = Path.Combine(root, "Workspace", "Chess", "MainWindow.xaml.cs");
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            await File.WriteAllTextAsync(path, "old", TestContext.Current.CancellationToken);
+
+            var result = await tools.ReplaceAsync(
+                "\"Workspace/Chess/MainWindow.xaml.cs\"",
+                "old",
+                "new",
+                replaceAll: false,
+                TestContext.Current.CancellationToken);
+
+            Assert.True(result.Success, result.Message);
+            Assert.Equal("Workspace/Chess/MainWindow.xaml.cs", result.FileName);
+            Assert.Equal("new", await File.ReadAllTextAsync(path, TestContext.Current.CancellationToken));
+        }
+        finally
+        {
+            DeleteTemporaryRoot(root);
+        }
+    }
+
+    [Fact]
+    public async Task SourceFileWrite_AfterProjectCreation_RebasesLooseWorkspaceFileIntoProject()
+    {
+        var root = CreateTemporaryRoot();
+        try
+        {
+            var tools = new McpSourceFileTools(CreateFileAccess(root));
+            using var core = AliCoreAssistantExecutionContext.Enter();
+            AliCoreAssistantExecutionContext.BindActiveProject(
+                "Workspace/SolarSystemOrbit/SolarSystemOrbit.csproj");
+
+            var result = await tools.WriteAsync(
+                "Workspace/MainWindow.xaml.cs",
+                "namespace SolarSystemOrbit;",
+                overwrite: false,
+                TestContext.Current.CancellationToken);
+
+            Assert.True(result.Success, result.Message);
+            Assert.Equal(
+                "Workspace/SolarSystemOrbit/MainWindow.xaml.cs",
+                result.FileName);
+            Assert.True(File.Exists(Path.Combine(
+                root,
+                "Workspace",
+                "SolarSystemOrbit",
+                "MainWindow.xaml.cs")));
+            Assert.False(File.Exists(Path.Combine(root, "Workspace", "MainWindow.xaml.cs")));
+
+            var nested = await tools.WriteAsync(
+                "Views/OrbitView.xaml.cs",
+                "namespace SolarSystemOrbit.Views;",
+                overwrite: false,
+                TestContext.Current.CancellationToken);
+
+            Assert.True(nested.Success, nested.Message);
+            Assert.Equal(
+                "Workspace/SolarSystemOrbit/Views/OrbitView.xaml.cs",
+                nested.FileName);
+            Assert.True(File.Exists(Path.Combine(
+                root,
+                "Workspace",
+                "SolarSystemOrbit",
+                "Views",
+                "OrbitView.xaml.cs")));
+        }
+        finally
+        {
+            DeleteTemporaryRoot(root);
+        }
+    }
+
+    [Fact]
     public async Task HeadlessRuntime_AppliesCapabilityGateBeforeReturningStdioTools()
     {
         var root = CreateTemporaryRoot();

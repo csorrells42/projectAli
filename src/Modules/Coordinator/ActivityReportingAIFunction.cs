@@ -207,6 +207,17 @@ internal sealed class ActivityReportingAIFunction(
                 {
                     DisplayName = UserFacingDisplayName
                 });
+            if (AliCoreAssistantExecutionContext.IsActive)
+            {
+                return new
+                {
+                    success = false,
+                    recoverable = true,
+                    tool = Name,
+                    error = ex.Message,
+                    instruction = "Correct the tool arguments from this error and continue the same user request. Do not end the turn while a useful corrected call remains possible."
+                };
+            }
             throw;
         }
     }

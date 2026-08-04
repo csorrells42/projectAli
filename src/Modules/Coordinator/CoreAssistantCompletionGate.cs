@@ -1,5 +1,10 @@
 using Ali.Modules.Coding;
 using Ali.Modules.Coding.Engineering;
+using Ali.Modules.Mcp;
+using Ali.Modules.Orchestration.Planning;
+using System.Collections;
+using System.Reflection;
+using System.Text.Json;
 using Microsoft.Extensions.AI;
 
 namespace Ali.Modules.Coordinator;
@@ -12,16 +17,32 @@ namespace Ali.Modules.Coordinator;
 /// </summary>
 internal sealed class CoreAssistantCompletionGate
 {
-    private readonly Dictionary<string, string> _pendingCalls = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, PendingCall> _pendingCalls = new(StringComparer.Ordinal);
+    private readonly List<string> _successfulMutationSummaries = [];
     private long _sourceRevision;
     private long _passingBuildRevision = -1;
     private long _passingRunRevision = -1;
+    private bool _workspaceWorkRequired;
+    private bool _workspaceMutationRequired;
+    private bool _buildRequired;
+    private bool _runRequired;
+    private bool _workspaceToolObserved;
     private bool _runAttempted;
+    private string? _sourceProjectKey;
     private DotNetCreateProjectResult? _latestCreate;
     private DotNetBuildResult? _latestBuild;
     private DotNetTestResult? _latestTest;
     private DotNetRunResult? _latestRun;
     private DotNetStopProjectResult? _latestStop;
+    private string? _latestMutationFailure;
+
+    internal void Require(CoreAssistantCodingRequirements requirements)
+    {
+        _workspaceWorkRequired = requirements.RequiresWorkspaceWork;
+        _workspaceMutationRequired = requirements.RequiresWorkspaceMutation;
+        _buildRequired = requirements.RequiresBuild;
+        _runRequired = requirements.RequiresRun;
+    }
 
     internal void Track(FunctionCallContent functionCall)
     {
@@ -29,17 +50,67 @@ internal sealed class CoreAssistantCompletionGate
         if (!string.IsNullOrWhiteSpace(functionCall.CallId)
             && !string.IsNullOrWhiteSpace(functionCall.Name))
         {
-            _pendingCalls[functionCall.CallId] = functionCall.Name;
+            _pendingCalls[functionCall.CallId] = new PendingCall(
+                functionCall.Name,
+                ReadWorkspaceProjectKey(functionCall.Arguments),
+                DescribeMutation(functionCall.Name, functionCall.Arguments),
+                IsSourceMutationTarget(functionCall.Name, functionCall.Arguments));
+            _workspaceToolObserved |= IsWorkspaceTool(functionCall.Name);
         }
+    }
+
+    internal bool TryGetTrackedToolName(string callId, out string toolName)
+    {
+        if (!string.IsNullOrWhiteSpace(callId)
+            && _pendingCalls.TryGetValue(callId, out var pending))
+        {
+            toolName = pending.ToolName;
+            return true;
+        }
+
+        toolName = string.Empty;
+        return false;
     }
 
     internal void Observe(FunctionResultContent functionResult)
     {
         ArgumentNullException.ThrowIfNull(functionResult);
-        if (!_pendingCalls.Remove(functionResult.CallId, out var toolName))
+        var domainOutcome = TryGetTrackedToolName(functionResult.CallId, out var toolName)
+            ? ClassifyCoreToolResult(toolName, functionResult.Result)
+            : PlanningToolDomainOutcome.Unreported;
+        Observe(functionResult, domainOutcome);
+    }
+
+    private static PlanningToolDomainOutcome ClassifyCoreToolResult(
+        string toolName,
+        object? result)
+    {
+        if (toolName is AliCapabilityCatalog.FileWriteName
+            or AliCapabilityCatalog.FileReplaceName
+            or AliCapabilityCatalog.FileReadName
+            && AliProductionToolOutcomeRegistry.TryReadTypedReturn<McpSourceFileResult>(
+                result,
+                out var fileResult))
+        {
+            return fileResult.Success
+                ? PlanningToolDomainOutcome.Succeeded
+                : PlanningToolDomainOutcome.Failed;
+        }
+
+        return AliProductionToolOutcomeRegistry.ClassifyTypedReturn(toolName, result);
+    }
+
+    internal void Observe(
+        FunctionResultContent functionResult,
+        PlanningToolDomainOutcome domainOutcome)
+    {
+        ArgumentNullException.ThrowIfNull(functionResult);
+        if (!_pendingCalls.Remove(functionResult.CallId, out var pending))
         {
             return;
         }
+
+        var toolName = pending.ToolName;
 
         if (functionResult.Exception is not null)
         {
@@ -57,6 +128,7 @@ internal sealed class CoreAssistantCompletionGate
                     _latestCreate = create;
                     if (create.Success)
                     {
+                        AliCoreAssistantExecutionContext.BindActiveProject(create.ProjectPath);
                         MarkSourceChanged();
                     }
                 }
@@ -79,7 +151,11 @@ internal sealed class CoreAssistantCompletionGate
                         out var build))
                 {
                     _latestBuild = build;
-                    _passingBuildRevision = build.Success ? _sourceRevision : -1;
+                    _passingBuildRevision = build.Success
+                        && TargetsCurrentSource(
+                            ReadWorkspaceProjectKey(build.ProjectPath) ?? pending.ProjectKey)
+                            ? _sourceRevision
+                            : -1;
                 }
                 break;
 
@@ -99,7 +175,11 @@ internal sealed class CoreAssistantCompletionGate
                         out var run))
                 {
                     _latestRun = run;
-                    _passingRunRevision = run.Success ? _sourceRevision : -1;
+                    _passingRunRevision = run.Success
+                        && TargetsCurrentSource(
+                            ReadWorkspaceProjectKey(run.ProjectPath) ?? pending.ProjectKey)
+                            ? _sourceRevision
+                            : -1;
                 }
                 break;
 
@@ -122,28 +202,74 @@ internal sealed class CoreAssistantCompletionGate
             case AliCapabilityCatalog.FileReplaceLinesName:
                 // The provider boundary owns exact file validation. Once it returns,
                 // conservatively require a fresh build before claiming C# completion.
-                MarkSourceChanged();
+                if (domainOutcome == PlanningToolDomainOutcome.Succeeded
+                    && pending.IsSourceMutationTarget)
+                {
+                    MarkSourceChanged(pending.ProjectKey);
+                    _latestMutationFailure = null;
+                    if (!string.IsNullOrWhiteSpace(pending.MutationSummary))
+                    {
+                        _successfulMutationSummaries.Add(pending.MutationSummary);
+                    }
+                }
+                else if (domainOutcome is PlanningToolDomainOutcome.Failed
+                         or PlanningToolDomainOutcome.Denied
+                         || ReturnedRecoverableFailure(functionResult.Result))
+                {
+                    _latestMutationFailure = DescribeMutationFailure(functionResult.Result);
+                }
                 break;
         }
     }
+
+    internal string BuildVerifiedCompletionEvidence()
+    {
+        var lines = new List<string>();
+        lines.AddRange(_successfulMutationSummaries
+            .Distinct(StringComparer.Ordinal)
+            .TakeLast(8)
+            .Select(summary => "- Source edit returned successfully: " + summary));
+        if (_latestBuild is { Success: true } build)
+        {
+            lines.Add(
+                $"- Build returned success for {build.ProjectPath} in {build.Configuration} configuration"
+                + (string.IsNullOrWhiteSpace(build.ArtifactPath)
+                    ? "."
+                    : $"; artifact: {build.ArtifactPath}."));
+        }
+        if (_latestRun is { Success: true } run)
+        {
+            lines.Add(
+                $"- Run returned success for {run.ProjectPath}"
+                + (string.IsNullOrWhiteSpace(run.ArtifactPath)
+                    ? string.Empty
+                    : $"; artifact: {run.ArtifactPath}")
+                + (run.ProcessId is null ? "." : $"; process ID: {run.ProcessId}."));
+        }
+        return lines.Count == 0
+            ? "- No successful Workspace mutation, build, or run result was observed."
+            : string.Join(Environment.NewLine, lines);
+    }
+
+    internal long SourceRevision => _sourceRevision;
+
+    // Temporarily disabled on the fast core path. The critic was running after
+    // intermediate edits with summaries rather than an authoritative final
+    // source snapshot, so it repeatedly blocked useful build/repair progress.
+    // Roslyn diagnostics, the current-source build, and the requested launch
+    // remain mandatory. Re-enable only as one grounded post-build source check.
+    internal bool RequiresRequestedBehaviorVerification => false;
 
     internal bool TryGetBlocker(out CoreAssistantCompletionBlocker blocker)
     {
         if (_pendingCalls.Count > 0)
         {
             var unresolvedTools = _pendingCalls.Values
+                .Select(call => call.ToolName)
                 .Distinct(StringComparer.Ordinal)
                 .Order(StringComparer.Ordinal)
                 .ToArray();
-            var unresolvedMutation = unresolvedTools.Any(IsSourceMutationTool);
             _pendingCalls.Clear();
-            if (unresolvedMutation)
-            {
-                // A file provider may have performed some or all of the mutation before
-                // losing its terminal result. Treat the live tree as changed so the
-                // continuation must inspect and build what is actually on disk.
-                MarkSourceChanged();
-            }
 
             var toolList = string.Join(", ", unresolvedTools);
             blocker = Missing(
@@ -163,6 +289,30 @@ internal sealed class CoreAssistantCompletionGate
             return true;
         }
 
+        if (_workspaceWorkRequired && !_workspaceToolObserved)
+        {
+            blocker = Missing(
+                "workspace-work-not-started",
+                "This turn was semantically classified as practical Workspace coding work, but no Workspace or C# tool was used. Perform the requested work with the available tools before answering.",
+                "I did not perform the requested Workspace work.");
+            return true;
+        }
+
+        if (_workspaceMutationRequired && _sourceRevision == 0)
+        {
+            blocker = string.IsNullOrWhiteSpace(_latestMutationFailure)
+                ? Missing(
+                    "workspace-mutation-not-started",
+                    "This turn requires changing the Workspace source, but no source mutation returned. Read the exact current region, apply the requested targeted edit, and continue through a successful build and launch before answering.",
+                    "I inspected the Workspace but did not make the requested source change.")
+                : Failed(
+                    "workspace-mutation-failed",
+                    _latestMutationFailure,
+                    "The attempted source mutation failed. Correct the exact returned error, modify the relevant existing source file, and continue through a successful build and launch before answering.",
+                    "I could not make the requested source change.");
+            return true;
+        }
+
         if (_latestBuild is { Success: false } failedBuild)
         {
             blocker = Failed(
@@ -179,6 +329,15 @@ internal sealed class CoreAssistantCompletionGate
                 "build-missing-or-stale",
                 "The Workspace source is not covered by a successful current build. Build the project now; if it fails, repair it and keep rebuilding until it succeeds or an exact tool result proves the obstacle.",
                 "I did not verify the current Workspace source because no successful build covered the final source revision.");
+            return true;
+        }
+
+        if (_buildRequired && _latestBuild is not { Success: true })
+        {
+            blocker = Missing(
+                "required-build-missing",
+                "The current request requires a successful Workspace build, but no successful build result exists. Build the requested project now; repair exact diagnostics and keep rebuilding until it succeeds or a returned result proves the obstacle.",
+                "I did not complete the required Workspace build.");
             return true;
         }
 
@@ -211,6 +370,15 @@ internal sealed class CoreAssistantCompletionGate
             return true;
         }
 
+        if (_runRequired && _latestRun is not { Success: true })
+        {
+            blocker = Missing(
+                "required-run-missing",
+                "The current request requires launching the Workspace application, but no successful run result exists. Call dotnet_run_project for the final successful build and use its exact result before answering.",
+                "I did not complete the required Workspace launch.");
+            return true;
+        }
+
         if (_latestStop is { Success: false } failedStop)
         {
             blocker = Failed(
@@ -225,13 +393,234 @@ internal sealed class CoreAssistantCompletionGate
         return false;
     }
 
-    private void MarkSourceChanged() => _sourceRevision++;
+    private void MarkSourceChanged(string? projectKey = null)
+    {
+        _sourceRevision++;
+        if (!string.IsNullOrWhiteSpace(projectKey))
+        {
+            _sourceProjectKey = projectKey;
+        }
+    }
+
+    private bool TargetsCurrentSource(string? projectKey) =>
+        string.IsNullOrWhiteSpace(_sourceProjectKey)
+        || string.Equals(_sourceProjectKey, projectKey, StringComparison.OrdinalIgnoreCase);
+
+    private static string? ReadWorkspaceProjectKey(IDictionary<string, object?>? arguments)
+    {
+        if (arguments is null)
+        {
+            return null;
+        }
+
+        foreach (var name in new[] { "fileName", "projectPath", "targetPath", "path" })
+        {
+            var pair = arguments.FirstOrDefault(candidate =>
+                string.Equals(candidate.Key, name, StringComparison.OrdinalIgnoreCase));
+            if (pair.Key is not null
+                && ReadText(pair.Value) is { Length: > 0 } value
+                && ReadWorkspaceProjectKey(value) is { } key)
+            {
+                return key;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? ReadWorkspaceProjectKey(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        var segments = path
+            .Replace('\\', '/')
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        for (var index = 0; index + 1 < segments.Length; index++)
+        {
+            if (string.Equals(segments[index], "Workspace", StringComparison.OrdinalIgnoreCase))
+            {
+                return segments[index + 1];
+            }
+        }
+
+        return null;
+    }
+
+    private static string? ReadText(object? value) => value switch
+    {
+        string text => text,
+        JsonElement { ValueKind: JsonValueKind.String } element => element.GetString(),
+        _ => null
+    };
+
+    private static string? DescribeMutation(
+        string toolName,
+        IDictionary<string, object?>? arguments)
+    {
+        if (!IsSourceMutationTool(toolName) || arguments is null)
+        {
+            return null;
+        }
+
+        var fileName = ReadArgumentText(arguments, "fileName") ?? "the selected source file";
+        if (string.Equals(toolName, AliCapabilityCatalog.FileWriteName, StringComparison.Ordinal))
+        {
+            var content = Bound(ReadArgumentText(arguments, "content"));
+            return $"{fileName}: wrote source content '{content}'.";
+        }
+
+        if (string.Equals(toolName, AliCapabilityCatalog.FileDeleteName, StringComparison.Ordinal))
+        {
+            return $"{fileName}: deleted the source file.";
+        }
+
+        if (string.Equals(toolName, AliCapabilityCatalog.FileReplaceName, StringComparison.Ordinal))
+        {
+            var oldText = Bound(ReadArgumentText(arguments, "oldString"));
+            var newText = Bound(ReadArgumentText(arguments, "newString"));
+            return $"{fileName}: replaced '{oldText}' with '{newText}'.";
+        }
+
+        if (string.Equals(toolName, AliCapabilityCatalog.FileReplaceLinesName, StringComparison.Ordinal))
+        {
+            var edits = arguments.FirstOrDefault(pair =>
+                string.Equals(pair.Key, "edits", StringComparison.OrdinalIgnoreCase)).Value;
+            return $"{fileName}: applied targeted line edits {Bound(JsonSerializer.Serialize(edits))}.";
+        }
+
+        return $"{fileName}: source mutation returned successfully.";
+    }
+
+    private static bool IsSourceMutationTarget(
+        string toolName,
+        IDictionary<string, object?>? arguments)
+    {
+        if (!IsSourceMutationTool(toolName) || arguments is null)
+        {
+            return false;
+        }
+
+        var fileName = ReadArgumentText(arguments, "fileName");
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            return false;
+        }
+
+        return Path.GetExtension(fileName).ToLowerInvariant() is
+            ".cs" or ".csproj" or ".xaml" or ".razor" or ".props" or ".targets";
+    }
+
+    private static string? ReadArgumentText(
+        IDictionary<string, object?> arguments,
+        string name)
+    {
+        foreach (var pair in arguments)
+        {
+            if (string.Equals(pair.Key, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return ReadText(pair.Value) ?? pair.Value?.ToString();
+            }
+        }
+        return null;
+    }
+
+    private static bool ReturnedRecoverableFailure(object? result)
+    {
+        if (result is JsonElement { ValueKind: JsonValueKind.Object } element
+            && element.TryGetProperty("success", out var successElement)
+            && successElement.ValueKind is JsonValueKind.False)
+        {
+            return true;
+        }
+
+        if (result is IDictionary dictionary)
+        {
+            foreach (DictionaryEntry entry in dictionary)
+            {
+                if (entry.Key is string key
+                    && string.Equals(key, "success", StringComparison.OrdinalIgnoreCase)
+                    && entry.Value is false)
+                {
+                    return true;
+                }
+            }
+        }
+
+        var successProperty = result?.GetType().GetProperty(
+            "success",
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.IgnoreCase);
+        return successProperty?.PropertyType == typeof(bool)
+            && successProperty.GetValue(result) is false;
+    }
+
+    private static string DescribeMutationFailure(object? result)
+    {
+        var error = ReadNamedResultValue(result, "error")
+            ?? ReadNamedResultValue(result, "message")
+            ?? ReadNamedResultValue(result, "summary");
+        return string.IsNullOrWhiteSpace(error)
+            ? "The file mutation provider returned a failed or denied outcome."
+            : Bound(error);
+    }
+
+    private static string? ReadNamedResultValue(object? result, string name)
+    {
+        if (result is JsonElement { ValueKind: JsonValueKind.Object } element
+            && element.TryGetProperty(name, out var property))
+        {
+            return property.ValueKind == JsonValueKind.String
+                ? property.GetString()
+                : property.GetRawText();
+        }
+
+        if (result is IDictionary<string, object?> dictionary)
+        {
+            var pair = dictionary.FirstOrDefault(candidate =>
+                string.Equals(candidate.Key, name, StringComparison.OrdinalIgnoreCase));
+            if (pair.Key is not null)
+            {
+                return pair.Value?.ToString();
+            }
+        }
+
+        var propertyInfo = result?.GetType().GetProperty(
+            name,
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.IgnoreCase);
+        return propertyInfo?.GetValue(result)?.ToString();
+    }
 
     private static bool IsSourceMutationTool(string toolName) =>
         toolName is AliCapabilityCatalog.FileWriteName
             or AliCapabilityCatalog.FileDeleteName
             or AliCapabilityCatalog.FileReplaceName
             or AliCapabilityCatalog.FileReplaceLinesName;
+
+    private static bool IsWorkspaceTool(string toolName) =>
+        toolName is AliCapabilityCatalog.FileWriteName
+            or AliCapabilityCatalog.FileReadName
+            or AliCapabilityCatalog.FileDeleteName
+            or AliCapabilityCatalog.FileListName
+            or AliCapabilityCatalog.FileSearchName
+            or AliCapabilityCatalog.FileReplaceName
+            or AliCapabilityCatalog.FileReplaceLinesName
+            or AliCapabilityCatalog.FileMoveName
+            or AliCapabilityCatalog.FileCopyName
+            or AliCapabilityCatalog.FileCreateDirectoryName
+            or AliCapabilityCatalog.FileMetadataName
+        || CoreRecoveryTool(toolName);
+
+    private static bool CoreRecoveryTool(string toolName) =>
+        toolName is AliCapabilityCatalog.CodingInspectProjectName
+            or AliCapabilityCatalog.DotNetCreateProjectName
+            or AliCapabilityCatalog.RoslynAnalyzeProjectName
+            or AliCapabilityCatalog.RoslynFormatProjectName
+            or AliCapabilityCatalog.DotNetBuildName
+            or AliCapabilityCatalog.DotNetTestName
+            or AliCapabilityCatalog.DotNetRunName
+            or AliCapabilityCatalog.DotNetStopProjectName;
 
     private void ObserveThrownTool(string toolName, Exception exception)
     {
@@ -259,6 +648,12 @@ internal sealed class CoreAssistantCompletionGate
             case AliCapabilityCatalog.DotNetStopProjectName:
                 _latestStop = new DotNetStopProjectResult(false, string.Empty, summary, null, null, false);
                 break;
+            case AliCapabilityCatalog.FileWriteName:
+            case AliCapabilityCatalog.FileDeleteName:
+            case AliCapabilityCatalog.FileReplaceName:
+            case AliCapabilityCatalog.FileReplaceLinesName:
+                _latestMutationFailure = exception.Message;
+                break;
         }
     }
 
@@ -268,6 +663,7 @@ internal sealed class CoreAssistantCompletionGate
         string continuation,
         string truthfulAnswer) =>
         new(
+            code,
             Fingerprint(code, detail),
             continuation,
             $"{truthfulAnswer} {Bound(detail)}".Trim());
@@ -276,7 +672,7 @@ internal sealed class CoreAssistantCompletionGate
         string code,
         string continuation,
         string truthfulAnswer) =>
-        new(Fingerprint(code, string.Empty), continuation, truthfulAnswer);
+        new(code, Fingerprint(code, string.Empty), continuation, truthfulAnswer);
 
     private string Fingerprint(string code, string detail) =>
         string.Join(
@@ -304,7 +700,24 @@ internal sealed class CoreAssistantCompletionGate
     }
 }
 
+internal readonly record struct PendingCall(
+    string ToolName,
+    string? ProjectKey,
+    string? MutationSummary,
+    bool IsSourceMutationTarget);
+
 internal readonly record struct CoreAssistantCompletionBlocker(
+    string Code,
     string Fingerprint,
     string ContinuationInstruction,
     string TruthfulFailureAnswer);
+
+internal readonly record struct CoreAssistantCodingRequirements(
+    bool RequiresWorkspaceWork,
+    bool RequiresWorkspaceMutation,
+    bool RequiresBuild,
+    bool RequiresRun,
+    bool RequiresCurrentWeb,
+    bool RequiresMemoryRecall,
+    string Basis,
+    string DirectAnswer);

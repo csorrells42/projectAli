@@ -180,7 +180,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
             Tools = [probe],
             ToolMode = ChatToolMode.RequireSpecific(probe.Name),
             AllowMultipleToolCalls = false,
-            MaxOutputTokens = 64,
+            MaxOutputTokens = 256,
             AdditionalProperties = new AdditionalPropertiesDictionary
             {
                 [AliInternalModelRoutingProperties.SuppressInjectedPersona] = true

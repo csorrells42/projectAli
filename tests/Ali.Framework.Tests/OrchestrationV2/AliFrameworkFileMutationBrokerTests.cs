@@ -18,6 +18,39 @@ namespace Ali.Framework.Tests.OrchestrationV2;
 public sealed class AliFrameworkFileMutationBrokerTests
 {
     [Fact]
+    public async Task CoreAssistant_ReplacePublishesDirectlyWithoutDurableGrant()
+    {
+        using var fixture = new Fixture();
+        await File.WriteAllTextAsync(
+            fixture.PhysicalPath("core.txt"),
+            "before",
+            TestContext.Current.CancellationToken);
+
+        using (AliCoreAssistantExecutionContext.Enter())
+        {
+            _ = await InvokeProviderAsync<string>(
+                fixture.Provider,
+                "ReplaceAsync",
+                "Workspace/core.txt",
+                "before",
+                "after",
+                false,
+                TestContext.Current.CancellationToken);
+        }
+
+        Assert.Equal(
+            "after",
+            await File.ReadAllTextAsync(
+                fixture.PhysicalPath("core.txt"),
+                TestContext.Current.CancellationToken));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            fixture.Access.FrameworkStore.WriteAsync(
+                "Workspace/core.txt",
+                "outside-core-path",
+                TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
     public async Task Write_PreparesAnExactAbsentPreimage_ThenFrameworkPublishesOnlyWithOneUseGrant()
     {
         using var fixture = new Fixture();

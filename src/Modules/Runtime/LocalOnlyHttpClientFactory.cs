@@ -7,10 +7,7 @@ internal static class LocalOnlyHttpClientFactory
         ArgumentException.ThrowIfNullOrWhiteSpace(userAgent);
         var client = new HttpClient(CreateHandler(), disposeHandler: true);
         client.DefaultRequestHeaders.UserAgent.ParseAdd(userAgent);
-        if (timeout.HasValue)
-        {
-            client.Timeout = timeout.Value;
-        }
+        client.Timeout = timeout ?? Timeout.InfiniteTimeSpan;
 
         return client;
     }

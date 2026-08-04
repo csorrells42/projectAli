@@ -44,10 +44,10 @@ public partial class MainWindow : Window
             _startupTask = viewModel.StartLocalRuntimeAsync();
             var visionStartup = viewModel.InitializeVisionAsync();
             var mcpServerStartup = viewModel.InitializeMcpServerAsync();
-            var conversationBridgeStartup = viewModel.InitializeConversationBridgeAsync();
             var stackHealthStartup = viewModel.InitializeStackHealthAsync();
+            await _startupTask.ConfigureAwait(true);
+            var conversationBridgeStartup = viewModel.InitializeConversationBridgeAsync();
             await Task.WhenAll(
-                _startupTask,
                 visionStartup,
                 mcpServerStartup,
                 conversationBridgeStartup,

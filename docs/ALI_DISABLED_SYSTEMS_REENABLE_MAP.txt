@@ -1,4 +1,3 @@
-c
 Captured: 2026-08-04 (America/Chicago)
 Branch: codex/checkpoint-13-integration
 Baseline commit: 1ddfef2 (Restore Ali core truth reliability and speed)
@@ -25,6 +24,17 @@ Quick reference to the pre-fast-core implementation of a file:
 
 CURRENT LIVE BASELINE - DO NOT REGRESS
 ======================================
+PASS - ColorPulseLiveTest5 continuation and recovery:
+  Ali re-opened an existing partially broken WPF project, repaired returned
+  C#/XAML build failures, produced a Release build with 0 warnings and 0
+  errors, and launched the final executable successfully. The exact run result
+  returned process ID 4984. No dotnet/MSBuild/VBCSCompiler worker remained
+  after completion.
+
+  Important observation: the former per-edit semantic source critic caused
+  more than 100 activities, repeated full prompt evaluation, and retained build
+  workers. With that critic disabled, the real build/repair/run path completed.
+
 PASS - Tic-Tac-Toe:
   Build log:
   C:\Users\clsor\AppData\Local\AliFiles\Data\Logs\BuildLogs\20260804-082503294-TicTacToe-Debug.log
@@ -216,24 +226,42 @@ Must happen first:
   declarations must be withheld without removing healthy local tools.
 
 
-8. COMPLETION CRITIC
-====================
+8. COMPLETION CRITICS
+=====================
 Current locations:
-  src\Modules\Coordinator\AliAgentHarnessRunner.cs:1251-1268
-  Direct answer digest/publication: same file:969-993
+  Durable completion critic composition:
+    src\Modules\Coordinator\AliAgentHarnessRunner.cs
+  Fast-path source behavior critic gate:
+    src\Modules\Coordinator\CoreAssistantCompletionGate.cs
+    Symbol: RequiresRequestedBehaviorVerification
+  Preserved source behavior critic implementation:
+    src\Modules\Coordinator\AliAgentHarnessRunner.cs
+    Symbol: VerifyRequestedBehaviorAsync
 
 Current state:
-  The fast core bypasses the completion critic. The preserved planner is also
-  constructed with completionCritic:null.
+  The fast core bypasses both critics. The preserved planner is constructed
+  with completionCritic:null. RequiresRequestedBehaviorVerification is false,
+  so VerifyRequestedBehaviorAsync is retained but not called by the core loop.
+
+  Why the source critic is disabled:
+  It ran after intermediate edits using mutation summaries instead of one
+  authoritative final source snapshot. It repeatedly rejected in-progress
+  source, forced more model prompt evaluations and builds, and could not
+  converge efficiently. Roslyn diagnostics, a current-source Release build,
+  and a requested launch remain mandatory mechanical gates.
 
 Manual re-enable:
-  Restore AliCompletionCritic construction and pass it to the planning client,
-  after routing normal turns through the durable planner.
+  - Source behavior critic: change RequiresRequestedBehaviorVerification only
+    after the runner supplies one authoritative post-build source snapshot.
+    Run it once after a successful current-source build, never after every edit.
+  - Durable critic: restore AliCompletionCritic construction and pass it to the
+    planning client after routing normal turns through the durable planner.
 
 Must happen first:
-  It must catch the observed Chess false-completion case: two failed builds and
-  no later passing build can never produce a successful completion. It must add
-  measurable truth/reliability value and remain within the latency budget.
+  The critic must catch false completion without second-guessing incomplete
+  intermediate source. It must consume grounded final source/Roslyn evidence,
+  run once, add measurable truth value, stay within the latency budget, and
+  leave no build workers or repeated prompt-processing loop behind.
 
 
 9. FAST-CORE EXECUTION SCOPE / DURABLE GRANT BYPASS

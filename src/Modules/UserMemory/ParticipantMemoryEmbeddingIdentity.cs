@@ -204,6 +204,8 @@ internal sealed class ProbedParticipantMemoryEmbeddingIdentitySource :
     private const string ProbeText = "ali-participant-memory-embedding-identity-probe-v1";
     private readonly OpenAiCompatibleEmbeddingClient _client;
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private LocalEmbeddingConfiguration? _cachedConfiguration;
+    private ParticipantMemoryEmbeddingIdentity? _cachedIdentity;
     private int _disposed;
 
     internal ProbedParticipantMemoryEmbeddingIdentitySource(HttpClient httpClient)
@@ -242,6 +244,12 @@ internal sealed class ProbedParticipantMemoryEmbeddingIdentitySource :
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            if (Equals(_cachedConfiguration, configuration)
+                && _cachedIdentity is not null)
+            {
+                return _cachedIdentity;
+            }
+
             var probe = await _client.CreateMem0CompatibleEmbeddingAsync(
                 configuration,
                 ProbeText,
@@ -304,6 +312,8 @@ internal sealed class ProbedParticipantMemoryEmbeddingIdentitySource :
                     $"live-fixed-vector-and-{ParticipantMemoryLimits.MaximumMemoryTextLength}-character-boundary-probe-v1",
                     ProbeVerified: true,
                     ProbeVerifiedUtc: verifiedAt).Normalize();
+                _cachedConfiguration = configuration;
+                _cachedIdentity = identity;
                 return identity;
             }
             finally
@@ -322,6 +332,8 @@ internal sealed class ProbedParticipantMemoryEmbeddingIdentitySource :
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 0)
         {
+            _cachedConfiguration = null;
+            _cachedIdentity = null;
             _gate.Dispose();
         }
     }

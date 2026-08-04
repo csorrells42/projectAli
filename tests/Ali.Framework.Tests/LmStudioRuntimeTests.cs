@@ -373,6 +373,173 @@ public sealed class LmStudioRuntimeTests
     }
 
     [Fact]
+    public async Task PerCallOutputBudget_IsSentWithoutExpansion()
+    {
+        var handler = new LmStudioChatHandler();
+        using var client = new HttpClient(handler);
+        var runtime = CreateChatRuntime(client, LocalRuntimeEngines.LmStudio);
+
+        await runtime.GetResponseAsync(
+            [new Microsoft.Extensions.AI.ChatMessage(Microsoft.Extensions.AI.ChatRole.User, "hello")],
+            new ChatOptions { MaxOutputTokens = 2_048 },
+            TestContext.Current.CancellationToken);
+
+        using var payload = JsonDocument.Parse(Assert.Single(handler.RequestBodies));
+        Assert.Equal(2_048, payload.RootElement.GetProperty("max_tokens").GetInt32());
+    }
+
+    [Fact]
+    public async Task MultipleSystemInstructions_AreMergedIntoOneOrderedMessage()
+    {
+        var handler = new LmStudioChatHandler();
+        using var client = new HttpClient(handler);
+        var runtime = CreateChatRuntime(client, LocalRuntimeEngines.LmStudio);
+
+        await runtime.GetResponseAsync(
+            [
+                new Microsoft.Extensions.AI.ChatMessage(
+                    Microsoft.Extensions.AI.ChatRole.System,
+                    "conversation-specific instruction"),
+                new Microsoft.Extensions.AI.ChatMessage(
+                    Microsoft.Extensions.AI.ChatRole.System,
+                    string.Empty),
+                new Microsoft.Extensions.AI.ChatMessage(
+                    Microsoft.Extensions.AI.ChatRole.User,
+                    "hello")
+            ],
+            new ChatOptions
+            {
+                Instructions = "request-specific instruction",
+                MaxOutputTokens = 2_048
+            },
+            TestContext.Current.CancellationToken);
+
+        using var payload = JsonDocument.Parse(Assert.Single(handler.RequestBodies));
+        var messages = payload.RootElement.GetProperty("messages").EnumerateArray().ToArray();
+        var systemMessage = Assert.Single(
+            messages,
+            message =>
+                string.Equals(
+                    message.GetProperty("role").GetString(),
+                    "system",
+                    StringComparison.Ordinal));
+        var content = systemMessage.GetProperty("content").GetString();
+        Assert.Contains("request-specific instruction", content, StringComparison.Ordinal);
+        Assert.Contains("conversation-specific instruction", content, StringComparison.Ordinal);
+        Assert.Equal("user", messages[^1].GetProperty("role").GetString());
+    }
+
+    [Fact]
+    public async Task CompactedContinuation_IsNormalizedToStrictAlternatingRoles()
+    {
+        var handler = new LmStudioChatHandler();
+        using var client = new HttpClient(handler);
+        var runtime = CreateChatRuntime(client, LocalRuntimeEngines.LmStudio);
+        var call = new Microsoft.Extensions.AI.ChatMessage(
+            Microsoft.Extensions.AI.ChatRole.Assistant,
+            [new FunctionCallContent("call-1", "inspect")]);
+        var result = new Microsoft.Extensions.AI.ChatMessage(
+            Microsoft.Extensions.AI.ChatRole.Tool,
+            [new FunctionResultContent("call-1", new { success = true })]);
+
+        await runtime.GetResponseAsync(
+            [
+                new Microsoft.Extensions.AI.ChatMessage(Microsoft.Extensions.AI.ChatRole.User, "original request"),
+                new Microsoft.Extensions.AI.ChatMessage(Microsoft.Extensions.AI.ChatRole.User, "compacted evidence"),
+                call,
+                result,
+                new Microsoft.Extensions.AI.ChatMessage(Microsoft.Extensions.AI.ChatRole.User, "continue the work")
+            ],
+            new ChatOptions { MaxOutputTokens = 2_048 },
+            TestContext.Current.CancellationToken);
+
+        using var payload = JsonDocument.Parse(Assert.Single(handler.RequestBodies));
+        var messages = payload.RootElement.GetProperty("messages").EnumerateArray().ToArray();
+        Assert.Equal(
+            ["system", "user", "assistant", "tool", "assistant", "user"],
+            messages.Select(message => message.GetProperty("role").GetString() ?? string.Empty).ToArray());
+        Assert.Contains(
+            "original request",
+            messages[1].GetProperty("content").GetString(),
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "compacted evidence",
+            messages[1].GetProperty("content").GetString(),
+            StringComparison.Ordinal);
+        Assert.Equal("call-1", messages[2].GetProperty("tool_calls")[0].GetProperty("id").GetString());
+        Assert.Equal("call-1", messages[3].GetProperty("tool_call_id").GetString());
+        Assert.Equal("Tool result received.", messages[4].GetProperty("content").GetString());
+    }
+
+    [Fact]
+    public async Task AssistantLedCompactedHistory_GainsNeutralUserBoundaryAndKeepsToolCall()
+    {
+        var handler = new LmStudioChatHandler();
+        using var client = new HttpClient(handler);
+        var runtime = CreateChatRuntime(client, LocalRuntimeEngines.LmStudio);
+        var call = new Microsoft.Extensions.AI.ChatMessage(
+            Microsoft.Extensions.AI.ChatRole.Assistant,
+            [new FunctionCallContent("call-1", "inspect")]);
+        var result = new Microsoft.Extensions.AI.ChatMessage(
+            Microsoft.Extensions.AI.ChatRole.Tool,
+            [new FunctionResultContent("call-1", new { success = true })]);
+
+        await runtime.GetResponseAsync(
+            [
+                new Microsoft.Extensions.AI.ChatMessage(
+                    Microsoft.Extensions.AI.ChatRole.Assistant,
+                    "Preserved progress summary."),
+                call,
+                result,
+                new Microsoft.Extensions.AI.ChatMessage(
+                    Microsoft.Extensions.AI.ChatRole.Assistant,
+                    "Ready for the next instruction."),
+                new Microsoft.Extensions.AI.ChatMessage(
+                    Microsoft.Extensions.AI.ChatRole.User,
+                    "continue the work")
+            ],
+            new ChatOptions { MaxOutputTokens = 2_048 },
+            TestContext.Current.CancellationToken);
+
+        using var payload = JsonDocument.Parse(Assert.Single(handler.RequestBodies));
+        var messages = payload.RootElement.GetProperty("messages").EnumerateArray().ToArray();
+        Assert.Equal(
+            ["system", "user", "assistant", "tool", "assistant", "user"],
+            messages.Select(message => message.GetProperty("role").GetString() ?? string.Empty).ToArray());
+        Assert.Equal("Continue the preserved request.", messages[1].GetProperty("content").GetString());
+        Assert.Contains(
+            "Preserved progress summary.",
+            messages[2].GetProperty("content").GetString(),
+            StringComparison.Ordinal);
+        Assert.Equal("call-1", messages[2].GetProperty("tool_calls")[0].GetProperty("id").GetString());
+    }
+
+    [Fact]
+    public async Task GemmaThinking_UsesLmStudioCanonicalTemplateFlagOnce()
+    {
+        var handler = new LmStudioChatHandler();
+        using var client = new HttpClient(handler);
+        var runtime = CreateGemmaChatRuntime(client);
+
+        await runtime.GetResponseAsync(
+            [new Microsoft.Extensions.AI.ChatMessage(Microsoft.Extensions.AI.ChatRole.User, "hello")],
+            new ChatOptions { MaxOutputTokens = 2_048 },
+            TestContext.Current.CancellationToken);
+
+        using var payload = JsonDocument.Parse(Assert.Single(handler.RequestBodies));
+        Assert.True(payload.RootElement
+            .GetProperty("chat_template_kwargs")
+            .GetProperty("enable_thinking")
+            .GetBoolean());
+        var firstSystemMessage = payload.RootElement
+            .GetProperty("messages")[0]
+            .GetProperty("content")
+            .GetString();
+        Assert.False(
+            firstSystemMessage?.StartsWith("<|think|>\n", StringComparison.Ordinal) ?? false);
+    }
+
+    [Fact]
     public async Task NamedRequiredToolChoice_PreservesOpenAiObjectDialectForGenericProvider()
     {
         var handler = new LmStudioChatHandler();
@@ -445,6 +612,31 @@ public sealed class LmStudioRuntimeTests
                 Engine = engine,
                 ReasoningEffort = "low",
                 ThinkingControl = ModelThinkingControl.GptOssReasoningEffort
+            });
+
+    private static OpenAiCompatibleLocalModelRuntime CreateGemmaChatRuntime(HttpClient client) =>
+        new(
+            client,
+            new OpenAiCompatibleRuntimeOptions(
+                Enabled: true,
+                Endpoint: LocalRuntimeEngines.DefaultEndpoint(LocalRuntimeEngines.LmStudio),
+                Model: "google/gemma-4-26b-a4b-qat",
+                DisplayName: "Gemma 4 26B A4B QAT",
+                Family: "Gemma",
+                Size: "26B-A4B",
+                Quantization: "Q4_0",
+                ContextTokens: 16_384,
+                OutputTokenLimit: 8_192,
+                Temperature: 0.2,
+                TopP: 0.95,
+                StreamingEnabled: true,
+                SupportsVision: true,
+                SupportsToolCalls: true,
+                AllowPrivateLanEndpoint: false)
+            {
+                Engine = LocalRuntimeEngines.LmStudio,
+                ThinkingEnabled = true,
+                ThinkingControl = ModelThinkingControl.GemmaSystemPromptToken
             });
 
     private sealed class RecordingHandler : HttpMessageHandler

@@ -1124,7 +1124,9 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
             };
         }
 
-        if (ThinkingControl == ModelThinkingControl.QwenTemplateToggle)
+        if (ThinkingControl == ModelThinkingControl.QwenTemplateToggle
+            || (ThinkingControl == ModelThinkingControl.GemmaSystemPromptToken
+                && IsLmStudioEndpoint()))
         {
             return new Dictionary<string, object>
             {
@@ -1392,7 +1394,9 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
         string payload,
         string? reasoningEffortOverride = null)
     {
-        if (ThinkingControl is ModelThinkingControl.None or ModelThinkingControl.GemmaSystemPromptToken)
+        if (ThinkingControl == ModelThinkingControl.None
+            || (ThinkingControl == ModelThinkingControl.GemmaSystemPromptToken
+                && !IsLmStudioEndpoint()))
         {
             return;
         }
@@ -1425,7 +1429,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
             || enableThinking.ValueKind != (_options.ThinkingEnabled ? JsonValueKind.True : JsonValueKind.False))
         {
             throw new InvalidOperationException(
-                $"Refusing to send a Qwen reasoning-model request without thinking set to {_options.ThinkingEnabled.ToString().ToLowerInvariant()}.");
+                $"Refusing to send a reasoning-model request without thinking set to {_options.ThinkingEnabled.ToString().ToLowerInvariant()}.");
         }
     }
 
@@ -1517,6 +1521,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
     private string BuildPrimarySystemInstruction(string content) =>
         ThinkingControl == ModelThinkingControl.GemmaSystemPromptToken
         && _options.ThinkingEnabled
+        && !IsLmStudioEndpoint()
             ? $"<|think|>\n{content}"
             : content;
 

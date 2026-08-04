@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
 using MeaiChatMessage = Microsoft.Extensions.AI.ChatMessage;
 using MeaiChatRole = Microsoft.Extensions.AI.ChatRole;
@@ -28,7 +29,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
             await EnsureLemonadeModelLoadedAsync(cancellationToken).ConfigureAwait(false);
             var messageList = messages.ToList();
             var requestOptions = options?.Clone() ?? new ChatOptions();
-            requestOptions.MaxOutputTokens = _options.OutputTokenLimit;
+            requestOptions.MaxOutputTokens = ResolveExtensionsAiMaxTokens(requestOptions.MaxOutputTokens);
             var useNativeOllama = IsNativeOllamaEndpoint();
             var uri = useNativeOllama ? BuildOllamaApiUri("chat") : BuildUri("chat/completions");
             cancellationToken.ThrowIfCancellationRequested();
@@ -44,7 +45,10 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
                 return ParseExtensionsAiResponse(body, useNativeOllama);
             }
 
-            throw new HttpRequestException(FormatChatHttpError(response.StatusCode, body));
+            throw new HttpRequestException(
+                FormatChatHttpError(response.StatusCode, body)
+                + " Serialized message roles: "
+                + DescribeExtensionsAiMessageRoles(payload));
         }
         finally
         {
@@ -101,7 +105,11 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
                 out var internalRouting)
             && internalRouting is true;
         var boundReasoningEffort = ResolveBoundReasoningEffort(options);
-        var serializedMessages = BuildExtensionsAiMessages(messages, suppressPersona, useNativeOllama);
+        var serializedMessages = BuildExtensionsAiMessages(
+            messages,
+            suppressPersona,
+            useNativeOllama,
+            options?.Instructions);
         var lmStudioRequiredFunctionName = IsLmStudioEndpoint()
             && options?.ToolMode is RequiredChatToolMode { RequiredFunctionName: { Length: > 0 } requiredName }
                 ? requiredName
@@ -112,7 +120,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
             throw new InvalidOperationException(
                 $"LM Studio required tool '{lmStudioRequiredFunctionName}' was not registered exactly once for this request.");
         }
-        var maxTokens = _options.OutputTokenLimit;
+        var maxTokens = ResolveExtensionsAiMaxTokens(options?.MaxOutputTokens);
         object payload = useNativeOllama
             ? new
             {
@@ -184,21 +192,64 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
         return boundReasoningEffort;
     }
 
+    private int ResolveExtensionsAiMaxTokens(int? requestedMaxTokens)
+    {
+        var resolved = requestedMaxTokens ?? _options.OutputTokenLimit;
+        if (resolved < 1)
+        {
+            throw new InvalidOperationException("A model request must reserve at least one output token.");
+        }
+
+        if (resolved > _options.OutputTokenLimit)
+        {
+            throw new InvalidOperationException(
+                $"The request asked for {resolved:N0} output tokens, which exceeds the selected runtime limit of {_options.OutputTokenLimit:N0}.");
+        }
+
+        return resolved;
+    }
+
     private object[] BuildExtensionsAiMessages(
         IReadOnlyList<MeaiChatMessage> messages,
         bool suppressPersona,
-        bool useNativeOllama)
+        bool useNativeOllama,
+        string? requestInstructions)
     {
-        var serialized = new List<object>();
+        var serialized = new List<ExtensionsAiMessagePayload>();
         var serializedToolCallIds = new HashSet<string>(StringComparer.Ordinal);
+        var systemInstructions = new List<string>();
         if (!suppressPersona)
         {
-            serialized.Add(new { role = "system", content = (object)BuildPrimarySystemInstruction(BuildAssistantPersonaInstruction()) });
-            serialized.Add(new { role = "system", content = (object)BuildCurrentDateInstruction() });
+            systemInstructions.Add(BuildPrimarySystemInstruction(BuildAssistantPersonaInstruction()));
+            systemInstructions.Add(BuildCurrentDateInstruction());
+        }
+        if (!string.IsNullOrWhiteSpace(requestInstructions))
+        {
+            systemInstructions.Add(requestInstructions.Trim());
+        }
+        foreach (var message in messages.Where(message => message.Role == MeaiChatRole.System))
+        {
+            if (!string.IsNullOrWhiteSpace(message.Text))
+            {
+                systemInstructions.Add(message.Text.Trim());
+            }
+        }
+        if (systemInstructions.Count > 0)
+        {
+            serialized.Add(new ExtensionsAiMessagePayload
+            {
+                Role = "system",
+                Content = string.Join(Environment.NewLine + Environment.NewLine, systemInstructions)
+            });
         }
 
         foreach (var message in messages)
         {
+            if (message.Role == MeaiChatRole.System)
+            {
+                continue;
+            }
+
             var functionCalls = message.Contents.OfType<FunctionCallContent>().ToArray();
             var functionResults = message.Contents.OfType<FunctionResultContent>().ToArray();
             if (functionResults.Length > 0)
@@ -207,21 +258,20 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
                 {
                     if (serializedToolCallIds.Contains(result.CallId))
                     {
-                        serialized.Add(new
+                        serialized.Add(new ExtensionsAiMessagePayload
                         {
-                            role = "tool",
-                            tool_call_id = result.CallId,
-                            content = SerializeToolResult(result.Result)
+                            Role = "tool",
+                            ToolCallId = result.CallId,
+                            Content = SerializeToolResult(result.Result)
                         });
                     }
                     else
                     {
-                        serialized.Add(new
-                        {
-                            role = "user",
-                            content = "AUTHORITATIVE TOOL RESULT (the earlier protocol call was compacted): "
-                                + SerializeToolResult(result.Result)
-                        });
+                        AddPlainMessage(
+                            serialized,
+                            "user",
+                            "AUTHORITATIVE TOOL RESULT (the earlier protocol call was compacted): "
+                            + SerializeToolResult(result.Result));
                     }
                 }
 
@@ -235,11 +285,20 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
                     serializedToolCallIds.Add(call.CallId);
                 }
 
-                serialized.Add(new
+                object? preservedAssistantContent = null;
+                if (serialized.Count > 0
+                    && string.Equals(serialized[^1].Role, "assistant", StringComparison.Ordinal)
+                    && serialized[^1].ToolCalls is null)
                 {
-                    role = "assistant",
-                    content = string.IsNullOrWhiteSpace(message.Text) ? null : message.Text,
-                    tool_calls = functionCalls.Select(call => new
+                    preservedAssistantContent = serialized[^1].Content;
+                    serialized.RemoveAt(serialized.Count - 1);
+                }
+
+                serialized.Add(new ExtensionsAiMessagePayload
+                {
+                    Role = "assistant",
+                    Content = MergeAssistantContent(preservedAssistantContent, message.Text),
+                    ToolCalls = functionCalls.Select(call => new
                     {
                         id = call.CallId,
                         type = "function",
@@ -255,11 +314,10 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
 
             if (message.Role == MeaiChatRole.Tool)
             {
-                serialized.Add(new
-                {
-                    role = "user",
-                    content = "AUTHORITATIVE TOOL RESULT: " + (message.Text ?? string.Empty)
-                });
+                AddPlainMessage(
+                    serialized,
+                    "user",
+                    "AUTHORITATIVE TOOL RESULT: " + (message.Text ?? string.Empty));
                 continue;
             }
 
@@ -273,11 +331,10 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
                 .ToArray();
             if (imageData.Length == 0 && imageUris.Length == 0)
             {
-                serialized.Add(new
-                {
-                    role = message.Role.ToString().ToLowerInvariant(),
-                    content = (object)(message.Text ?? string.Empty)
-                });
+                AddPlainMessage(
+                    serialized,
+                    message.Role.ToString().ToLowerInvariant(),
+                    message.Text ?? string.Empty);
                 continue;
             }
 
@@ -288,11 +345,11 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
                     throw new NotSupportedException("Ollama image messages require in-memory image data, not remote image URIs.");
                 }
 
-                serialized.Add(new
+                serialized.Add(new ExtensionsAiMessagePayload
                 {
-                    role = message.Role.ToString().ToLowerInvariant(),
-                    content = message.Text ?? string.Empty,
-                    images = imageData.Select(content => content.Base64Data).ToArray()
+                    Role = message.Role.ToString().ToLowerInvariant(),
+                    Content = message.Text ?? string.Empty,
+                    Images = imageData.Select(content => content.Base64Data).ToArray()
                 });
                 continue;
             }
@@ -313,14 +370,122 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
                 type = "image_url",
                 image_url = new { url = content.Uri }
             }));
-            serialized.Add(new
+            serialized.Add(new ExtensionsAiMessagePayload
             {
-                role = message.Role.ToString().ToLowerInvariant(),
-                content = (object)parts
+                Role = message.Role.ToString().ToLowerInvariant(),
+                Content = parts
             });
         }
 
-        return serialized.ToArray();
+        EnsureConversationStartsWithUser(serialized);
+        return serialized.Cast<object>().ToArray();
+    }
+
+    private static object? MergeAssistantContent(object? preservedContent, string? currentText)
+    {
+        var preserved = preservedContent as string;
+        if (string.IsNullOrWhiteSpace(preserved))
+        {
+            return string.IsNullOrWhiteSpace(currentText) ? null : currentText;
+        }
+
+        return string.IsNullOrWhiteSpace(currentText)
+            ? preserved
+            : string.Join(Environment.NewLine + Environment.NewLine, preserved, currentText);
+    }
+
+    private static void EnsureConversationStartsWithUser(List<ExtensionsAiMessagePayload> serialized)
+    {
+        var firstConversationIndex = serialized.Count > 0
+                                     && string.Equals(serialized[0].Role, "system", StringComparison.Ordinal)
+            ? 1
+            : 0;
+        if (firstConversationIndex < serialized.Count
+            && string.Equals(serialized[firstConversationIndex].Role, "assistant", StringComparison.Ordinal))
+        {
+            serialized.Insert(firstConversationIndex, new ExtensionsAiMessagePayload
+            {
+                Role = "user",
+                Content = "Continue the preserved request."
+            });
+        }
+    }
+
+    private static void AddPlainMessage(
+        List<ExtensionsAiMessagePayload> serialized,
+        string role,
+        string content)
+    {
+        if (serialized.Count > 0
+            && string.Equals(role, "user", StringComparison.Ordinal)
+            && string.Equals(serialized[^1].Role, "tool", StringComparison.Ordinal))
+        {
+            serialized.Add(new ExtensionsAiMessagePayload
+            {
+                Role = "assistant",
+                Content = "Tool result received."
+            });
+        }
+
+        if (serialized.Count > 0
+            && string.Equals(serialized[^1].Role, role, StringComparison.Ordinal)
+            && role is "user" or "assistant"
+            && serialized[^1].ToolCalls is null
+            && serialized[^1].Content is string previous)
+        {
+            serialized[^1].Content = string.Join(
+                Environment.NewLine + Environment.NewLine,
+                previous,
+                content);
+            return;
+        }
+
+        serialized.Add(new ExtensionsAiMessagePayload
+        {
+            Role = role,
+            Content = content
+        });
+    }
+
+    private static string DescribeExtensionsAiMessageRoles(string payload)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(payload);
+            return string.Join(
+                " > ",
+                document.RootElement
+                    .GetProperty("messages")
+                    .EnumerateArray()
+                    .Select(message =>
+                    {
+                        var role = message.GetProperty("role").GetString() ?? "unknown";
+                        return message.TryGetProperty("tool_calls", out var calls)
+                               && calls.ValueKind == JsonValueKind.Array
+                               && calls.GetArrayLength() > 0
+                            ? role + "(tool-call)"
+                            : role;
+                    }));
+        }
+        catch (JsonException)
+        {
+            return "unavailable";
+        }
+    }
+
+    private sealed class ExtensionsAiMessagePayload
+    {
+        public required string Role { get; init; }
+
+        public object? Content { get; set; }
+
+        [JsonPropertyName("tool_call_id")]
+        public string? ToolCallId { get; init; }
+
+        [JsonPropertyName("tool_calls")]
+        public object? ToolCalls { get; init; }
+
+        public ReadOnlyMemory<char>[]? Images { get; init; }
     }
 
     private static IEnumerable<object> BuildExtensionsAiTools(

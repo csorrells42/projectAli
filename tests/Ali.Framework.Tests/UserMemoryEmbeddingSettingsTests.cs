@@ -301,7 +301,7 @@ public sealed class UserMemoryEmbeddingSettingsTests
     }
 
     [Fact]
-    public async Task ProbedEmbeddingIdentity_ReverifiesEveryResolutionWithoutCaching()
+    public async Task ProbedEmbeddingIdentity_CachesExactConfigurationForProcessLifetime()
     {
         var handler = new FixedEmbeddingHandler();
         using var httpClient = new HttpClient(handler);
@@ -312,10 +312,10 @@ public sealed class UserMemoryEmbeddingSettingsTests
         var repeated = await Task.WhenAll(Enumerable.Range(0, 32).Select(
             _ => source.ResolveAsync(settings, TestContext.Current.CancellationToken).AsTask()));
 
-        Assert.Equal(66, handler.Count);
+        Assert.Equal(2, handler.Count);
         Assert.All(repeated, identity =>
         {
-            Assert.NotSame(first, identity);
+            Assert.Same(first, identity);
             Assert.Equal(first.Fingerprint, identity.Fingerprint);
         });
         Assert.All(handler.Bodies, body =>

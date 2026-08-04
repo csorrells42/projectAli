@@ -59,6 +59,7 @@ internal static class AliMsBuildProjectExecutor
                         "restore",
                         targetPath,
                         "--ignore-failed-sources",
+                        "--disable-build-servers",
                         "--nologo"
                     ],
                     "Build" =>
@@ -68,6 +69,7 @@ internal static class AliMsBuildProjectExecutor
                         "--configuration",
                         configuration,
                         "--no-restore",
+                        "--disable-build-servers",
                         "--nologo"
                     ],
                     _ => throw new UnreachableException()
