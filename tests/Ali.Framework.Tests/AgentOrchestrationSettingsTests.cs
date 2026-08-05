@@ -17,10 +17,7 @@ public sealed class AgentOrchestrationSettingsTests
             AgentOrchestrationSettingsStore.Save(root, new AgentOrchestrationSettings
             {
                 MagenticPolicy = policy,
-                MagenticMaximumRounds = 7,
-                ProgrammingAgentMode = ProgrammingAgentModes.Aider,
-                AlwaysUseProgrammingAgent = true,
-                OpenHandsWslDistribution = "Legacy-Distro"
+                MagenticMaximumRounds = 7
             });
 
             var loaded = AgentOrchestrationSettingsStore.LoadOrDefault(root);
@@ -28,8 +25,6 @@ public sealed class AgentOrchestrationSettingsTests
 
             Assert.Equal(MagenticPolicies.Off, loaded.MagenticPolicy);
             Assert.Equal(6, loaded.MagenticMaximumRounds);
-            Assert.Equal(ProgrammingAgentModes.Off, loaded.ProgrammingAgentMode);
-            Assert.False(loaded.AlwaysUseProgrammingAgent);
             Assert.DoesNotContain("magenticPolicy", persisted, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("magenticMaximumRounds", persisted, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("programmingAgentMode", persisted, StringComparison.OrdinalIgnoreCase);
@@ -68,8 +63,6 @@ public sealed class AgentOrchestrationSettingsTests
 
             Assert.Equal(MagenticPolicies.Off, loaded.MagenticPolicy);
             Assert.Equal(6, loaded.MagenticMaximumRounds);
-            Assert.Equal(ProgrammingAgentModes.Off, loaded.ProgrammingAgentMode);
-            Assert.False(loaded.AlwaysUseProgrammingAgent);
 
             AgentOrchestrationSettingsStore.Save(root, loaded);
             var rewritten = File.ReadAllText(AgentOrchestrationSettingsStore.GetPath(root));
@@ -154,13 +147,8 @@ public sealed class AgentOrchestrationSettingsTests
         Assert.DoesNotContain("ArchiveCheckpointsCommand", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("SettingsSaveAgentOrchestration", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("SettingsAgentOrchestrationStatus", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("SettingsProgrammingAgentMode", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("SettingsAlwaysUseProgrammingAgent", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Programming engines", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("SettingsOpenHandsWslDistribution", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("SettingsRefreshProgrammingAgents", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("OpenHands", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("Aider", xaml, StringComparison.Ordinal);
 
         var viewModel = File.ReadAllText(FindRepositoryFile(
             "src", "UI", "ViewModels", "AgentOrchestrationSettingsViewModel.cs"));
@@ -171,65 +159,6 @@ public sealed class AgentOrchestrationSettingsTests
         Assert.DoesNotContain("CheckpointSummary", viewModel, StringComparison.Ordinal);
         Assert.DoesNotContain("ArchiveCheckpointsCommand", viewModel, StringComparison.Ordinal);
         Assert.DoesNotContain("Directory.Move", viewModel, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void LegacyExternalSelection_NormalizesToAliAndRemovesExternalTools()
-    {
-        var settings = new AgentOrchestrationSettings
-        {
-            ProgrammingAgentMode = ProgrammingAgentModes.OpenHands,
-            AlwaysUseProgrammingAgent = true
-        }.Normalize();
-        var instructions = AliToolCatalog.BuildInstructions(
-            "Ali",
-            settings);
-        var inventory = AliCapabilityCatalog.ListAvailableTools(settings);
-
-        Assert.Equal(ProgrammingAgentModes.Off, settings.ProgrammingAgentMode);
-        Assert.False(settings.AlwaysUseProgrammingAgent);
-        Assert.DoesNotContain(inventory.Tools, item => item.Name == AliCapabilityCatalog.CodingAgentStatusName);
-        Assert.DoesNotContain(inventory.Tools, item => item.Name == AliCapabilityCatalog.CodingAgentExecuteName);
-        Assert.Contains("Ali is the sole coding executor", instructions, StringComparison.Ordinal);
-    }
-
-    [Theory]
-    [InlineData(ProgrammingAgentModes.Off)]
-    [InlineData(ProgrammingAgentModes.Aider)]
-    [InlineData(ProgrammingAgentModes.OpenHands)]
-    [InlineData(ProgrammingAgentModes.Hybrid)]
-    [InlineData("retired-provider")]
-    [InlineData(" AIDER ")]
-    public void ProgrammingAgentMode_NormalizesEveryLegacySelectionToOff(string mode)
-    {
-        var settings = new AgentOrchestrationSettings
-        {
-            ProgrammingAgentMode = mode,
-            AlwaysUseProgrammingAgent = true
-        }.Normalize();
-
-        Assert.Equal(ProgrammingAgentModes.Off, settings.ProgrammingAgentMode);
-        Assert.False(settings.AlwaysUseProgrammingAgent);
-    }
-
-    [Fact]
-    public void OffProgrammingAgentMode_RemovesExternalAgentsAndClearsAlwaysUse()
-    {
-        var settings = new AgentOrchestrationSettings
-        {
-            ProgrammingAgentMode = ProgrammingAgentModes.Off,
-            AlwaysUseProgrammingAgent = true
-        }.Normalize();
-
-        var inventory = AliCapabilityCatalog.ListAvailableTools(settings);
-
-        Assert.False(settings.AlwaysUseProgrammingAgent);
-        Assert.DoesNotContain(inventory.Tools, item => item.Name == AliCapabilityCatalog.CodingAgentStatusName);
-        Assert.DoesNotContain(inventory.Tools, item => item.Name == AliCapabilityCatalog.CodingAgentExecuteName);
-        Assert.Contains(
-            "Ali is the sole coding executor",
-            AliToolCatalog.BuildInstructions("Ali", settings),
-            StringComparison.Ordinal);
     }
 
     private static string FindRepositoryFile(params string[] segments)

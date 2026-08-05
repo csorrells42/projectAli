@@ -18,46 +18,19 @@ public static class MagenticPolicies
     public static string Normalize(string? _) => Off;
 }
 
-public static class ProgrammingAgentModes
-{
-    public const string Off = "off";
-    public const string Aider = "aider";
-    public const string OpenHands = "openhands";
-    public const string Hybrid = "hybrid";
-
-    public static IReadOnlyList<string> All { get; } = [Off];
-
-    public static string Normalize(string? _) => Off;
-}
-
 public sealed record AgentOrchestrationSettings
 {
-    // These two members keep dormant callers source-compatible while the single-loop
-    // cut is completed. They are fixed, ignored on read, and omitted on write.
+    // Legacy orchestration members are fixed, ignored on read, and omitted on write.
     [JsonIgnore]
     public string MagenticPolicy { get; init; } = MagenticPolicies.Off;
 
     [JsonIgnore]
     public int MagenticMaximumRounds { get; init; } = 6;
 
-    [JsonIgnore]
-    public string ProgrammingAgentMode { get; init; } = ProgrammingAgentModes.Off;
-
-    [JsonIgnore]
-    public bool AlwaysUseProgrammingAgent { get; init; }
-
-    [JsonIgnore]
-    public string OpenHandsWslDistribution { get; init; } = "Ubuntu-24.04";
-
     public AgentOrchestrationSettings Normalize() => this with
     {
         MagenticPolicy = MagenticPolicies.Off,
-        MagenticMaximumRounds = 6,
-        ProgrammingAgentMode = ProgrammingAgentModes.Off,
-        AlwaysUseProgrammingAgent = false,
-        OpenHandsWslDistribution = string.IsNullOrWhiteSpace(OpenHandsWslDistribution)
-            ? "Ubuntu-24.04"
-            : OpenHandsWslDistribution.Trim()
+        MagenticMaximumRounds = 6
     };
 }
 

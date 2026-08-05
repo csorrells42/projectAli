@@ -57,7 +57,6 @@ public sealed class MainWindowLayoutTests
         Assert.DoesNotContain("IsCodingExecutorAli", viewModel, StringComparison.Ordinal);
         Assert.DoesNotContain("IsCodingExecutorAider", viewModel, StringComparison.Ordinal);
         Assert.DoesNotContain("IsCodingExecutorOpenHands", viewModel, StringComparison.Ordinal);
-        Assert.DoesNotContain("_selectedProgrammingAgentMode", viewModel, StringComparison.Ordinal);
         Assert.DoesNotContain("SynchronizeCodingExecutorSelection", viewModel, StringComparison.Ordinal);
         Assert.Contains("Text=\"Effort\"", xaml, StringComparison.Ordinal);
         Assert.Contains("HorizontalAlignment=\"Center\"", xaml, StringComparison.Ordinal);

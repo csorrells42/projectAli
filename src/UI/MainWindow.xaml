@@ -353,7 +353,7 @@
               Foreground="{StaticResource TextBrush}">
             <MenuItem Header="_File">
                 <MenuItem Header="_Identity Review..." Click="OpenIdentityReviewMenuItem_OnClick" />
-                <MenuItem Header="_Choose Data Folder..." Click="OpenDataFolderMenuItem_OnClick" />
+                <MenuItem Header="_Choose Coding Workspace..." Click="OpenWorkspaceFolderMenuItem_OnClick" />
                 <MenuItem Header="_Identity Engine">
                     <MenuItem Header="_CPU" IsCheckable="True" IsChecked="True" />
                     <MenuItem Header="_DirectML GPU" IsCheckable="True" IsEnabled="False" ToolTip="GPU identity remains held back until its recognition path passes validation." />

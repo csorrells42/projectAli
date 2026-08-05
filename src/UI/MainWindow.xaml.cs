@@ -351,9 +351,9 @@ public partial class MainWindow : Window
         _identityReviewSession = null;
     }
 
-    private void OpenDataFolderMenuItem_OnClick(object sender, RoutedEventArgs e)
+    private void OpenWorkspaceFolderMenuItem_OnClick(object sender, RoutedEventArgs e)
     {
-        var currentFolder = AliServices.LocalAliRoot;
+        var currentFolder = AliServices.DesktopWorkspaceRoot;
         var dialog = new AliDataFolderDialog(currentFolder) { Owner = this };
         if (dialog.ShowDialog() != true)
         {
@@ -369,12 +369,13 @@ public partial class MainWindow : Window
             return;
         }
 
-        AliDataFolderSelectionStore.Save(selectedFolder);
+        AliWorkspaceFolderSettingsStore.Save(AliServices.DesktopSettingsRoot, selectedFolder);
         MessageBox.Show(
             this,
-            $"Ali's data folder is now set to:{Environment.NewLine}{selectedFolder}"
-                + $"{Environment.NewLine}{Environment.NewLine}Restart Ali to use the selected folder.",
-            "Ali Data Folder",
+            $"Ali's coding workspace is now set to:{Environment.NewLine}{selectedFolder}"
+                + $"{Environment.NewLine}{Environment.NewLine}Settings, memory, logs, and service data remain in Ali's permanent data folder."
+                + $"{Environment.NewLine}{Environment.NewLine}Restart Ali to use the selected coding workspace.",
+            "Ali Coding Workspace",
             MessageBoxButton.OK,
             MessageBoxImage.Information);
     }

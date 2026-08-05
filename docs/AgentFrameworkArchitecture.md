@@ -37,7 +37,7 @@ Legacy nested-workflow checkpoint files may remain on disk from earlier builds. 
 
 ## External coding-agent boundary
 
-Ali is the sole coding executor. Production composition does not construct Aider or OpenHands ownership, does not register their status or execution functions, and does not subscribe to their progress events. Dormant compatibility providers and packaging assets may remain in source or deployment until final package cleanup, but no desktop or headless MCP production path exposes them.
+Ali is the sole coding executor. Production composition does not construct external coding-agent ownership, register external executor functions, or subscribe to external executor progress events. Retired compatibility providers and packaging assets are not shipped.
 
 Ali performs software work through her native programming, Roslyn, language-provider, build, test, run, debugger, architecture, source-control, and delivery tools under the ordinary capability and permission boundary.
 

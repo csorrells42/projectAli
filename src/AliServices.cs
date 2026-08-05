@@ -303,8 +303,7 @@ public sealed class AliServices
                 return Path.GetFullPath(configuredRoot.Trim());
             }
 
-            return AliDataFolderSelectionStore.Load()
-                ?? Path.Combine(GetLocalApplicationDataRoot(), LocalAliRootFolderName);
+            return Path.Combine(GetLocalApplicationDataRoot(), LocalAliRootFolderName);
         }
     }
 
@@ -313,6 +312,10 @@ public sealed class AliServices
     public static string DesktopSettingsRoot => Path.Combine(LocalAliRoot, "Settings");
 
     public static string DesktopUserDataRoot => Path.Combine(LocalAliRoot, "Data");
+
+    public static string DesktopWorkspaceRoot =>
+        AliWorkspaceFolderSettingsStore.Load(DesktopSettingsRoot)
+        ?? Path.Combine(DesktopUserDataRoot, "Workspace");
 
     public static string GetProfileDataRoot(AssistantProfile assistantProfile) =>
         Path.Combine(DesktopUserDataRoot, "Profiles", assistantProfile.Normalize().ProfileId);
@@ -433,7 +436,8 @@ public sealed class AliServices
             toolPermissions,
             activeUsers,
             durableOrchestrationRoot: durableOrchestrationRoot,
-            assistantProfileBinding: assistantProfileBinding);
+            assistantProfileBinding: assistantProfileBinding,
+            workspaceRootOverride: DesktopWorkspaceRoot);
         var agentWorkMemory = new AliAgentWorkMemory(
             userDataRoot,
             durableOrchestrationRoot,

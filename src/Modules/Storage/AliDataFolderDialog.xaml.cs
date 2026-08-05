@@ -27,7 +27,7 @@ public partial class AliDataFolderDialog : Window, IComponentConnector
 	{
 		OpenFolderDialog openFolderDialog = new OpenFolderDialog
 		{
-			Title = "Choose Ali data folder",
+			Title = "Choose Ali coding workspace",
 			InitialDirectory = (Directory.Exists(SelectedFolder) ? SelectedFolder : AppContext.BaseDirectory),
 			Multiselect = false
 		};

@@ -218,7 +218,6 @@ try {
         '..\tts-packages',
         '..\whisper-packages',
         '..\mem0-packages',
-        '..\aider-packages',
         'import site'
     ) | Set-Content -LiteralPath $pthFile -Encoding Ascii
 

@@ -39,18 +39,6 @@
              Link="docs\AgentFrameworkArchitecture.md"
              CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest" />
-    <Content Include="$(MSBuildThisFileDirectory)docs\EXTERNAL-CODING-AGENTS.md"
-             Link="docs\EXTERNAL-CODING-AGENTS.md"
-             CopyToOutputDirectory="PreserveNewest"
-             CopyToPublishDirectory="PreserveNewest" />
-    <Content Include="$(MSBuildThisFileDirectory)tools\SetupOpenHands.ps1"
-             Link="tools\SetupOpenHands.ps1"
-             CopyToOutputDirectory="PreserveNewest"
-             CopyToPublishDirectory="PreserveNewest" />
-    <Content Include="$(MSBuildThisFileDirectory)tools\wslconfig.openhands"
-             Link="tools\wslconfig.openhands"
-             CopyToOutputDirectory="PreserveNewest"
-             CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <Target Name="RemoveAliNonEnglishSatelliteResources"

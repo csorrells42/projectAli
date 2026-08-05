@@ -112,10 +112,6 @@ public sealed class SemanticToolCatalogTests
         Assert.Equal(tools.Length, assignments.Distinct(StringComparer.Ordinal).Count());
         Assert.All(tools, tool => Assert.Contains(tool.Name, assignments));
         Assert.Contains(buckets, bucket => bucket.Id == "capability-discovery" && bucket.AlwaysVisible);
-        var external = Assert.Single(buckets, bucket => bucket.Id == "external-coding-agents");
-        Assert.False(external.AlwaysVisible);
-        Assert.Contains(AliCapabilityCatalog.CodingAgentExecuteName, external.ToolNames);
-        Assert.Contains("programming-core", external.Requires ?? []);
         Assert.Contains(buckets, bucket => bucket.Id == "csharp-dotnet"
             && bucket.Requires is not null
             && bucket.Requires.Contains("programming-core")
@@ -597,8 +593,6 @@ internal static class RetiredSingleLoopSurfaceCanary
 {
     public static IReadOnlyList<string> ToolNames { get; } =
     [
-        AliCapabilityCatalog.CodingAgentStatusName,
-        AliCapabilityCatalog.CodingAgentExecuteName,
         AliCapabilityCatalog.ConsultSoftwareEngineerName,
         AliCapabilityCatalog.ConsultResearcherName,
         AliCapabilityCatalog.ConsultOfficeSpecialistName,
@@ -614,7 +608,6 @@ internal static class RetiredSingleLoopSurfaceCanary
 
     public static IReadOnlyList<string> BucketIds { get; } =
     [
-        "external-coding-agents",
         "specialists-workflows"
     ];
 }

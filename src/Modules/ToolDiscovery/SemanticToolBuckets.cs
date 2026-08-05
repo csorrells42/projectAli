@@ -320,12 +320,6 @@ internal static class SemanticToolBuckets
                 AliCapabilityCatalog.RunMagenticOrchestrationName,
                 AliCapabilityCatalog.ListRecoverableWorkflowsName,
                 AliCapabilityCatalog.ResumeWorkflowCheckpointName
-            ]),
-        new(
-            "external-coding-agents",
-            "External coding executor and verification",
-            "The user-selected Aider or OpenHands implementation bridge. Its Programming Core dependency supplies Ali's compact language-aware inspection, build, test and run evidence tools in the same turn.",
-            [AliCapabilityCatalog.CodingAgentStatusName, AliCapabilityCatalog.CodingAgentExecuteName],
-            ["programming-core"])
+            ])
     ];
 }

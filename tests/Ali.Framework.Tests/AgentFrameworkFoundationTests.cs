@@ -44,7 +44,6 @@ public sealed class AgentFrameworkFoundationTests
         Assert.DoesNotContain("new AliAgentWorkflowFactory", runner, StringComparison.Ordinal);
         Assert.DoesNotContain("CreateStandardTools(", runner, StringComparison.Ordinal);
         Assert.DoesNotContain("CreateMagenticTool(", runner, StringComparison.Ordinal);
-        Assert.DoesNotContain("new AliExternalCodingAgents", coding, StringComparison.Ordinal);
         Assert.DoesNotContain("ProgressReported +=", catalog, StringComparison.Ordinal);
         Assert.Contains("var codingModule = new AliCodingModule(", services, StringComparison.Ordinal);
         Assert.Contains("durableOrchestrationRoot:", services, StringComparison.Ordinal);
@@ -56,18 +55,13 @@ public sealed class AgentFrameworkFoundationTests
     public void AuthoritativeInventoryIncludesFrameworkToolsAndRetiresNestedOrchestration()
     {
         var inventory = Ali.Modules.Coordinator.AliCapabilityCatalog.ListAvailableTools(
-            new Ali.Modules.Coordinator.AgentOrchestrationSettings
-            {
-                ProgrammingAgentMode = Ali.Modules.Coordinator.ProgrammingAgentModes.Aider
-            });
+            new Ali.Modules.Coordinator.AgentOrchestrationSettings());
         var names = inventory.Tools.Select(tool => tool.Name).ToArray();
 
         Assert.Equal(119, names.Length);
         Assert.Equal(names.Length, names.Distinct(StringComparer.Ordinal).Count());
         var retiredNames = new[]
         {
-            Ali.Modules.Coordinator.AliCapabilityCatalog.CodingAgentStatusName,
-            Ali.Modules.Coordinator.AliCapabilityCatalog.CodingAgentExecuteName,
             Ali.Modules.Coordinator.AliCapabilityCatalog.ConsultSoftwareEngineerName,
             Ali.Modules.Coordinator.AliCapabilityCatalog.ConsultResearcherName,
             Ali.Modules.Coordinator.AliCapabilityCatalog.ConsultOfficeSpecialistName,

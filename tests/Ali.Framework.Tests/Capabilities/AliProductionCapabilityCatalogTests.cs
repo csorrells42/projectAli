@@ -13,8 +13,6 @@ public sealed class AliProductionCapabilityCatalogTests
 {
     private static readonly string[] CatalogDeclaredRetiredToolNames =
     [
-        AliCapabilityCatalog.CodingAgentStatusName,
-        AliCapabilityCatalog.CodingAgentExecuteName,
         AliCapabilityCatalog.ConsultSoftwareEngineerName,
         AliCapabilityCatalog.ConsultResearcherName,
         AliCapabilityCatalog.ConsultOfficeSpecialistName,

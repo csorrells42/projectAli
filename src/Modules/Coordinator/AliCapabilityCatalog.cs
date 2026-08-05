@@ -51,8 +51,6 @@ public static class AliCapabilityCatalog
     public const string ReadAgentSkillResourceName = "read_skill_resource";
     public const string RunAgentSkillScriptName = "run_skill_script";
     public const string CodingListCapabilitiesName = "coding_list_capabilities";
-    public const string CodingAgentStatusName = "coding_agent_status";
-    public const string CodingAgentExecuteName = "coding_agent_execute";
     public const string CodingInspectProjectName = "coding_inspect_project";
     public const string CodingIndexProjectName = "coding_index_project";
     public const string CodingSearchSymbolsName = "coding_search_symbols";
@@ -185,8 +183,6 @@ public static class AliCapabilityCatalog
         new(ReadAgentSkillResourceName, "Read one exact resource referenced by a loaded Agent Skill.", "Microsoft Agent Framework Agent Skills"),
         new(RunAgentSkillScriptName, "Run one exact script referenced by a loaded Agent Skill, subject to approval.", "Microsoft Agent Framework Agent Skills"),
         new(CodingListCapabilitiesName, "Return the live registered coding providers, toolchains, and shared execution/intelligence infrastructure.", "Ali multi-language coding foundation"),
-        new(CodingAgentStatusName, "Report the selected external coding executor and readiness of Aider and OpenHands.", "Ali external coding agents"),
-        new(CodingAgentExecuteName, "Execute a substantial approved programming objective through the selected Aider or OpenHands executor.", "Ali external coding agents"),
         new(CodingInspectProjectName, "Detect an approved project's language, manifest, provider, capabilities, and toolchains.", "Ali multi-language coding foundation"),
         new(CodingIndexProjectName, "Build a bounded cross-language structural source index.", "Ali multi-language coding foundation"),
         new(CodingSearchSymbolsName, "Search the local cross-language source index for symbols.", "Ali multi-language coding foundation"),

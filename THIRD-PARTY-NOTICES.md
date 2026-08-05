@@ -39,11 +39,6 @@ Notable runtime boundaries:
   Their pinned Python dependency tree is restored from
   `tools/runtime-assets/requirements-mem0.txt`; every dependency retains its
   own upstream license.
-- Aider Chat 0.86.2 is licensed under Apache-2.0. Its pinned Python dependency
-  tree is restored from `tools/runtime-assets/requirements-aider.txt`; every
-  dependency retains its own upstream license.
-- OpenHands CLI 1.16.0 is licensed under MIT and is installed into the user's
-  selected WSL distribution rather than copied into the Project Ali bundle.
 - TreeSitter.DotNet 1.3.0 and its packaged language grammars retain their
   upstream MIT and grammar-specific licenses.
 - Microsoft Roslyn 5.6.0, MSBuild API packages 18.3.3, and MSBuild Locator

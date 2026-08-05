@@ -441,8 +441,6 @@ public sealed class AliProductionCompositionIntegrationTests
             reason => AliProductionCapabilityCatalog.IsRetiredToolName(reason.ToolName));
         var retiredNames = new[]
         {
-            AliCapabilityCatalog.CodingAgentStatusName,
-            AliCapabilityCatalog.CodingAgentExecuteName,
             AliCapabilityCatalog.ConsultSoftwareEngineerName,
             AliCapabilityCatalog.ConsultResearcherName,
             AliCapabilityCatalog.ConsultOfficeSpecialistName,

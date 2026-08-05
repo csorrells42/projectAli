@@ -35,8 +35,6 @@ public static class AliProductionCapabilityCatalog
             .ToArray());
 
     private static readonly IReadOnlySet<string> RetiredToolNames = ToolSet(
-        AliCapabilityCatalog.CodingAgentStatusName,
-        AliCapabilityCatalog.CodingAgentExecuteName,
         AliCapabilityCatalog.ConsultSoftwareEngineerName,
         AliCapabilityCatalog.ConsultResearcherName,
         AliCapabilityCatalog.ConsultOfficeSpecialistName,
