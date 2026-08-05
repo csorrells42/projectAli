@@ -10,6 +10,9 @@ TestResults/
 **/Properties/launchSettings.json
 outputs/
 /work/
+/standalone/**/release/
+ali*-run.log
+ali*-run.err
 tmp/
 lib/voice/python-venv/
 lib/voice/piper/*.onnx

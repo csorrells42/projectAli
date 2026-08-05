@@ -19,6 +19,13 @@ removed. Never leave repository debris behind after integration.
 Before changing any file, verify the repository root and current branch. If the
 checkout is not the canonical path on `master`, stop and report the mismatch.
 
+# HARD BUILD RULE: ENGLISH-ONLY OUTPUT
+
+Ali is built and distributed for English-speaking users in the United States.
+Do not copy or publish satellite resource language packs. Keep
+`SatelliteResourceLanguages` restricted to `en`, and do not commit generated
+build, publish, release, `bin`, or `obj` output.
+
 # Project Ali Codex completion gate
 
 Before finishing any turn that changes this repository, perform a final scope-and-trust review. Do not return a completion message until every applicable condition below is true.

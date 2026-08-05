@@ -9,6 +9,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
+    <!-- Ali ships in English; do not copy dependency satellite resources for unused cultures. -->
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <ApplicationIcon>Assets\ali.ico</ApplicationIcon>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- Agent Framework's file-access API is preview in 1.15.0; usage is isolated behind Modules/WorkstationFiles. -->
