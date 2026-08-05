@@ -298,18 +298,23 @@ internal sealed class CoreAssistantCompletionGate
             return true;
         }
 
+        if (_workspaceMutationRequired
+            && !string.IsNullOrWhiteSpace(_latestMutationFailure))
+        {
+            blocker = Failed(
+                "workspace-mutation-failed",
+                _latestMutationFailure,
+                "The latest attempted source mutation failed. Correct the exact returned error, successfully modify the relevant existing source file, and continue through a fresh successful build and launch before answering.",
+                "I could not complete the latest requested source change.");
+            return true;
+        }
+
         if (_workspaceMutationRequired && _sourceRevision == 0)
         {
-            blocker = string.IsNullOrWhiteSpace(_latestMutationFailure)
-                ? Missing(
-                    "workspace-mutation-not-started",
-                    "This turn requires changing the Workspace source, but no source mutation returned. Read the exact current region, apply the requested targeted edit, and continue through a successful build and launch before answering.",
-                    "I inspected the Workspace but did not make the requested source change.")
-                : Failed(
-                    "workspace-mutation-failed",
-                    _latestMutationFailure,
-                    "The attempted source mutation failed. Correct the exact returned error, modify the relevant existing source file, and continue through a successful build and launch before answering.",
-                    "I could not make the requested source change.");
+            blocker = Missing(
+                "workspace-mutation-not-started",
+                "This turn requires changing the Workspace source, but no source mutation returned. Read the exact current region, apply the requested targeted edit, and continue through a successful build and launch before answering.",
+                "I inspected the Workspace but did not make the requested source change.");
             return true;
         }
 

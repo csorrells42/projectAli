@@ -215,15 +215,6 @@ public sealed class AuditedAgentFileStore(
             return;
         }
 
-        var turnBaseline = AliCoreAssistantExecutionContext.CaptureFileBaseline(path, currentContent);
-        if (turnBaseline.CharacterLength >= 256
-            && postContent.Length < turnBaseline.CharacterLength * 3L / 4L)
-        {
-            throw new InvalidDataException(
-                "The core assistant rejected edits that would cumulatively remove more than one quarter of the existing source file during this turn. "
-                + "Preserve the working source and make smaller targeted replacements, then build after each coherent batch.");
-        }
-
         ValidateCoreCSharpSyntaxEdit(path, currentContent, postContent, cancellationToken);
     }
 

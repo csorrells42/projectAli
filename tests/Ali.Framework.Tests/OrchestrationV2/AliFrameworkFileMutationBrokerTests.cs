@@ -51,6 +51,39 @@ public sealed class AliFrameworkFileMutationBrokerTests
     }
 
     [Fact]
+    public async Task CoreAssistant_ReplaceAllowsAValidFullSourceRewrite()
+    {
+        using var fixture = new Fixture();
+        var original = "namespace Demo; public static class Program { "
+            + string.Concat(Enumerable.Repeat("private static int Value() => 1; ", 20))
+            + "public static void Main() { } }";
+        const string replacement =
+            "namespace Demo; public static class Program { public static void Main() { } }";
+        await File.WriteAllTextAsync(
+            fixture.PhysicalPath("Program.cs"),
+            original,
+            TestContext.Current.CancellationToken);
+
+        using (AliCoreAssistantExecutionContext.Enter())
+        {
+            _ = await InvokeProviderAsync<string>(
+                fixture.Provider,
+                "ReplaceAsync",
+                "Workspace/Program.cs",
+                original,
+                replacement,
+                false,
+                TestContext.Current.CancellationToken);
+        }
+
+        Assert.Equal(
+            replacement,
+            await File.ReadAllTextAsync(
+                fixture.PhysicalPath("Program.cs"),
+                TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
     public async Task Write_PreparesAnExactAbsentPreimage_ThenFrameworkPublishesOnlyWithOneUseGrant()
     {
         using var fixture = new Fixture();

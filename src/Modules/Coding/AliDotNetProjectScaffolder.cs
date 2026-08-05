@@ -55,6 +55,13 @@ internal sealed class AliDotNetProjectScaffolder
             try
             {
                 execution = await ExecuteCreateAsync(project, normalizedTemplate, cancellationToken).ConfigureAwait(false);
+                if (execution.ExitCode == 0 && File.Exists(project.PhysicalPath))
+                {
+                    var git = await ExecuteGitInitializeAsync(project, cancellationToken).ConfigureAwait(false);
+                    execution = new ProcessExecutionResult(
+                        git.ExitCode,
+                        execution.Output + Environment.NewLine + git.Output);
+                }
             }
             finally
             {
@@ -77,7 +84,9 @@ internal sealed class AliDotNetProjectScaffolder
         }
 
         started.Stop();
-        var success = execution.ExitCode == 0 && File.Exists(project.PhysicalPath);
+        var success = execution.ExitCode == 0
+            && File.Exists(project.PhysicalPath)
+            && Directory.Exists(Path.Combine(project.ProjectDirectory, ".git"));
         if (success)
         {
             _projectTracker.RecordScaffold(project.PhysicalPath);
@@ -92,7 +101,7 @@ internal sealed class AliDotNetProjectScaffolder
                 success,
                 execution.ExitCode,
                 started.ElapsedMilliseconds,
-                success ? "Project scaffold created." : "Project creation returned an error.",
+                success ? "Project scaffold and Git repository created." : "Project creation returned an error.",
                 cancellationToken)
             .ConfigureAwait(false);
         return new DotNetCreateProjectResult(
@@ -101,7 +110,7 @@ internal sealed class AliDotNetProjectScaffolder
             normalizedTemplate,
             execution.ExitCode,
             success
-                ? "The project scaffold was created. Write the requested application files next, then build it."
+                ? "The project scaffold and its Git repository were created. No commit was made. Write the requested application files next, then build it."
                 : "Project creation failed. Review the SDK output before continuing.",
             CompactOutput(execution.Output),
             started.ElapsedMilliseconds);
@@ -168,6 +177,45 @@ internal sealed class AliDotNetProjectScaffolder
 
         using var process = Process.Start(startInfo)
             ?? throw new InvalidOperationException("Windows did not start the .NET SDK.");
+        var standardOutput = process.StandardOutput.ReadToEndAsync();
+        var standardError = process.StandardError.ReadToEndAsync();
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+
+            throw;
+        }
+
+        return new ProcessExecutionResult(
+            process.ExitCode,
+            await standardOutput.ConfigureAwait(false) + await standardError.ConfigureAwait(false));
+    }
+
+    private static async Task<ProcessExecutionResult> ExecuteGitInitializeAsync(
+        NewProject project,
+        CancellationToken cancellationToken)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = "git",
+            WorkingDirectory = project.ProjectDirectory,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        startInfo.ArgumentList.Add("init");
+        startInfo.Environment["GIT_TERMINAL_PROMPT"] = "0";
+
+        using var process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Windows did not start Git.");
         var standardOutput = process.StandardOutput.ReadToEndAsync();
         var standardError = process.StandardError.ReadToEndAsync();
         try

@@ -2655,10 +2655,8 @@ public sealed class MainWindowViewModel : ObservableObject
         var userMessageId = recoveryContext?.UserMessageId ?? $"msg_user_{Guid.NewGuid():N}";
         var assistantMessageId = recoveryContext?.AssistantMessageId
             ?? $"msg_asst_{Guid.NewGuid():N}";
-        // Binary attachments are intentionally outside the current release path. They must
-        // never delay, overflow, or survive into an otherwise independent text request.
-        var attachments = new List<ChatAttachment>();
-        var attachmentMetadata = new List<StoredAttachmentMetadata>();
+        var attachments = Attachments.Select(a => a.ToCoreAttachment()).ToList();
+        var attachmentMetadata = Attachments.Select(ToStoredAttachmentMetadata).ToList();
         ChatMessageViewModel? userMessage = null;
         ChatMessageViewModel assistantMessage;
         if (isRecoveryDecision)

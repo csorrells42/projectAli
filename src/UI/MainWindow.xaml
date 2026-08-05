@@ -855,7 +855,7 @@
                 </ItemsControl>
             </ScrollViewer>
 
-            <Grid Grid.Row="3" HorizontalAlignment="Stretch" VerticalAlignment="Bottom">
+                <Grid Grid.Row="3" HorizontalAlignment="Stretch" VerticalAlignment="Bottom">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
@@ -866,6 +866,30 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
+
+                <ItemsControl Grid.ColumnSpan="2"
+                              ItemsSource="{Binding Attachments}"
+                              Margin="0,0,0,8">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <WrapPanel />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="{x:Type vm:ImageAttachmentViewModel}">
+                            <Border Background="{StaticResource PanelAltBrush}" BorderBrush="{StaticResource BorderBrushDark}" BorderThickness="1" CornerRadius="8" Padding="8" Margin="0,0,8,8" Width="150">
+                                <StackPanel>
+                                    <Image Source="{Binding FilePath}" Height="74" Stretch="Uniform" />
+                                    <TextBlock Text="{Binding FileName}" TextTrimming="CharacterEllipsis" FontSize="11" Foreground="{StaticResource MutedTextBrush}" Margin="0,6,0,0" />
+                                    <CheckBox Content="Retain" IsChecked="{Binding RetainAfterSession}" Margin="0,4,0,0" />
+                                    <Button Content="Remove"
+                                            Command="{Binding DataContext.RemoveAttachmentCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            CommandParameter="{Binding}" />
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
 
                 <Grid Grid.Row="1" Grid.Column="0">
                     <Grid.RowDefinitions>
@@ -1041,6 +1065,7 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
 
                         <TextBox x:Name="ComposerTextBox"
@@ -1065,18 +1090,28 @@
                                  PreviewKeyDown="ComposerTextBox_OnPreviewKeyDown" />
 
                          <Button Grid.Column="1"
+                                  x:Name="PasteImageButton"
+                                 AutomationProperties.AutomationId="MainChatAttachScreenshotButton"
+                                 Content="&#xE722; Image"
+                                 Command="{Binding PasteImageCommand}"
+                                 ToolTip="Paste the current clipboard image and preview it before sending."
+                                 Style="{StaticResource ComposerButton}"
+                                 VerticalAlignment="Bottom"
+                                 MinWidth="88" />
+
+                        <Button Grid.Column="2"
                                  x:Name="PushToTalkButton"
-                                AutomationProperties.AutomationId="MainChatPushToTalkButton"
-                                Content="{Binding PushToTalkKeyButtonText}"
-                                Command="{Binding TogglePushToTalkCommand}"
-                                ToolTip="{Binding PushToTalkHintText}"
-                                PreviewMouseLeftButtonDown="PushToTalkButton_OnPreviewMouseLeftButtonDown"
-                                PreviewMouseLeftButtonUp="PushToTalkButton_OnPreviewMouseLeftButtonUp"
-                                LostMouseCapture="PushToTalkButton_OnLostMouseCapture"
-                                Style="{StaticResource ComposerButton}"
-                                VerticalAlignment="Bottom"
-                                MinWidth="116" />
-                         <Grid Grid.Column="2"
+                                 AutomationProperties.AutomationId="MainChatPushToTalkButton"
+                                 Content="{Binding PushToTalkKeyButtonText}"
+                                 Command="{Binding TogglePushToTalkCommand}"
+                                 ToolTip="{Binding PushToTalkHintText}"
+                                 PreviewMouseLeftButtonDown="PushToTalkButton_OnPreviewMouseLeftButtonDown"
+                                 PreviewMouseLeftButtonUp="PushToTalkButton_OnPreviewMouseLeftButtonUp"
+                                 LostMouseCapture="PushToTalkButton_OnLostMouseCapture"
+                                 Style="{StaticResource ComposerButton}"
+                                 VerticalAlignment="Bottom"
+                                 MinWidth="116" />
+                         <Grid Grid.Column="3"
                               MinWidth="92"
                               Margin="4,0,0,0"
                               VerticalAlignment="Bottom">

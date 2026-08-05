@@ -18,6 +18,8 @@ public sealed class DotNetCodingToolsTests
                 "console",
                 TestContext.Current.CancellationToken);
             Assert.True(created.Success, created.Output);
+            Assert.True(Directory.Exists(Path.Combine(root, "workspace", "RequestedApp", ".git")));
+            Assert.Contains("No commit was made", created.Summary, StringComparison.Ordinal);
 
             var untouchedBuild = await tools.BuildAsync(
                 "Workspace/RequestedApp/RequestedApp.csproj",

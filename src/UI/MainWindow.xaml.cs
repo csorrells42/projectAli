@@ -113,6 +113,20 @@ public partial class MainWindow : Window
 
     private async void ComposerTextBox_OnPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
+        if (e.Key == Key.V && Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
+        {
+            if (DataContext is MainWindowViewModel currentViewModel)
+            {
+                await currentViewModel.AddClipboardImageAsync().ConfigureAwait(true);
+                if (System.Windows.Clipboard.ContainsImage())
+                {
+                    e.Handled = true;
+                }
+            }
+
+            return;
+        }
+
         if (e.Key != Key.Enter || Keyboard.Modifiers.HasFlag(ModifierKeys.Shift))
         {
             return;

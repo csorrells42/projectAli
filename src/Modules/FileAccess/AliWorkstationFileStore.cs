@@ -138,6 +138,7 @@ public sealed class AliWorkstationFileStore : AgentFileStore
         }
 
         var source = resolved.Mount.ResolvePhysicalPath(resolved.RelativePath);
+        RejectGitRepositoryDeletion(source);
         if (!Path.GetFullPath(source).Equals(
                 Path.GetFullPath(expectedSourcePath),
                 StringComparison.OrdinalIgnoreCase))
@@ -260,6 +261,7 @@ public sealed class AliWorkstationFileStore : AgentFileStore
 
         cancellationToken.ThrowIfCancellationRequested();
         var source = resolved.Mount.ResolvePhysicalPath(resolved.RelativePath);
+        RejectGitRepositoryDeletion(source);
         var isFile = File.Exists(source);
         var isDirectory = Directory.Exists(source);
         if (!isFile && !isDirectory)
@@ -363,6 +365,7 @@ public sealed class AliWorkstationFileStore : AgentFileStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         var trimmed = path.Trim();
+        RejectPresentedGitControlPath(trimmed);
         if (Path.IsPathFullyQualified(trimmed)
             || trimmed.Contains('/')
             || trimmed.Contains('\\')
@@ -389,6 +392,7 @@ public sealed class AliWorkstationFileStore : AgentFileStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         var trimmed = path.Trim();
+        RejectPresentedGitControlPath(trimmed);
         if (Path.IsPathFullyQualified(trimmed)
             || trimmed.Contains('/')
             || trimmed.Contains('\\')
@@ -419,6 +423,7 @@ public sealed class AliWorkstationFileStore : AgentFileStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         var trimmed = path.Trim();
+        RejectPresentedGitControlPath(trimmed);
         if (!Path.IsPathFullyQualified(trimmed)
             && !trimmed.Contains('/')
             && !trimmed.Contains('\\')
@@ -454,6 +459,11 @@ public sealed class AliWorkstationFileStore : AgentFileStore
             || segments.Any(segment => segment is "." or ".." || segment.Contains(':', StringComparison.Ordinal)))
         {
             throw new ArgumentException("File paths must stay beneath an approved workstation mount.", nameof(path));
+        }
+        if (segments.Skip(1).Any(IsGitControlSegment))
+        {
+            throw new InvalidOperationException(
+                "Git repository control data is protected. Use Git operations instead of workstation file tools for .git content.");
         }
 
         if (!_mounts.TryGetValue(segments[0], out var mount))
@@ -514,6 +524,8 @@ public sealed class AliWorkstationFileStore : AgentFileStore
                 throw new ArgumentException("A file name is required beneath the workstation mount.", nameof(path));
             }
 
+            RejectPresentedGitControlPath(relativePath);
+
             return new ResolvedPath(mount, relativePath);
         }
 
@@ -521,6 +533,36 @@ public sealed class AliWorkstationFileStore : AgentFileStore
             "Absolute paths are accepted only when they resolve inside an approved workstation folder. "
             + $"Retry with a virtual path beginning with one of: {string.Join(", ", _mounts.Keys)}.",
             nameof(path));
+    }
+
+    private static void RejectPresentedGitControlPath(string path)
+    {
+        var segments = path
+            .Replace('\\', '/')
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (segments.Any(IsGitControlSegment))
+        {
+            throw new InvalidOperationException(
+                "Git repository control data is protected. Use Git operations instead of workstation file tools for .git content.");
+        }
+    }
+
+    private static bool IsGitControlSegment(string segment) =>
+        segment.Equals(".git", StringComparison.OrdinalIgnoreCase);
+
+    private static void RejectGitRepositoryDeletion(string source)
+    {
+        if (!Directory.Exists(source))
+        {
+            return;
+        }
+
+        var gitControlPath = Path.Combine(source, ".git");
+        if (Directory.Exists(gitControlPath) || File.Exists(gitControlPath))
+        {
+            throw new InvalidOperationException(
+                "Ali will not delete a Git repository. Preserve the repository and use Git to manage its source history.");
+        }
     }
 
     private static string NormalizeMountName(string name)

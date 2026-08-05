@@ -88,6 +88,33 @@ public sealed class WorkstationFileAccessTests
     }
 
     [Fact]
+    public async Task CoreAssistant_ValidFullSourceRewriteIsAllowed()
+    {
+        await WithAccessAsync(async (_, access, _) =>
+        {
+            const string path = "Workspace/App/Program.cs";
+            var original = "namespace App; public static class Program { "
+                + string.Concat(Enumerable.Repeat("private static int Value() => 1; ", 20))
+                + "public static void Main() { } }";
+            const string replacement =
+                "namespace App; public static class Program { public static void Main() { } }";
+            await access.Store.WriteAsync(path, original, TestContext.Current.CancellationToken);
+
+            using (AliCoreAssistantExecutionContext.Enter())
+            {
+                await access.Store.WriteAsync(
+                    path,
+                    replacement,
+                    TestContext.Current.CancellationToken);
+            }
+
+            Assert.Equal(
+                replacement,
+                await access.Store.ReadAsync(path, TestContext.Current.CancellationToken));
+        });
+    }
+
+    [Fact]
     public async Task ModelPresentedDoubleQuotes_AreRemovedFromVirtualPathBoundary()
     {
         await WithAccessAsync(async (root, access, _) =>
@@ -554,6 +581,42 @@ public sealed class WorkstationFileAccessTests
             await Assert.ThrowsAsync<ArgumentException>(() => access.Store.DeleteAsync(
                 "Workspace",
                 TestContext.Current.CancellationToken));
+        });
+    }
+
+    [Fact]
+    public async Task GitRepositoryControlDataAndRepositoryDeletionAreRejected()
+    {
+        await WithAccessAsync(async (root, access, _) =>
+        {
+            var repository = Path.Combine(root, "workspace", "repository");
+            Directory.CreateDirectory(Path.Combine(repository, ".git"));
+            await File.WriteAllTextAsync(
+                Path.Combine(repository, ".git", "config"),
+                "protected",
+                TestContext.Current.CancellationToken);
+            await File.WriteAllTextAsync(
+                Path.Combine(repository, "Program.cs"),
+                "namespace Repository;",
+                TestContext.Current.CancellationToken);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                access.Store.WriteAsync(
+                    "Workspace/repository/.git/config",
+                    "changed",
+                    TestContext.Current.CancellationToken));
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                access.Store.DeleteAsync(
+                    "Workspace/repository/.git",
+                    TestContext.Current.CancellationToken));
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                access.Store.DeleteAsync(
+                    "Workspace/repository",
+                    TestContext.Current.CancellationToken));
+
+            Assert.True(Directory.Exists(repository));
+            Assert.True(Directory.Exists(Path.Combine(repository, ".git")));
+            Assert.True(File.Exists(Path.Combine(repository, "Program.cs")));
         });
     }
 

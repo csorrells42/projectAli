@@ -1259,7 +1259,6 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         var finalWorkspaceReportRequested = false;
         long behaviorVerifiedRevision = -1;
         long lastRejectedBehaviorRevision = -1;
-        var repeatedBehaviorRepairAttempts = 0;
         var behaviorRepairFocused = false;
         var behaviorFullRewriteFocused = false;
         string? requiredFocusedToolName = null;
@@ -1357,25 +1356,14 @@ internal sealed class AliAgentHarnessRunner : IDisposable
                                 lastRejectedBehaviorRevision == completionGate.SourceRevision;
                             if (repeatedWithoutMutation)
                             {
-                                repeatedBehaviorRepairAttempts++;
-                                if (repeatedBehaviorRepairAttempts > 1)
-                                {
-                                    turn.Report(
-                                        AgentActivityKind.Error,
-                                        "Workspace behavior repair stopped after no progress",
-                                        "A targeted edit and one forced complete-file write both returned without a successful source revision. Ali is reporting the exact obstacle instead of repeating the same failed mutation indefinitely.");
-                                    renderedAnswer.Append(
-                                        "I could not finish the requested source behavior because repeated mutation attempts returned without changing the Workspace source. The project was not built or launched, so I will not claim that it works.");
-                                    completedSuccessfully = false;
-                                    finalWorkspaceReportRequested = true;
-                                    break;
-                                }
-
                                 behaviorFullRewriteFocused = true;
+                                turn.Report(
+                                    AgentActivityKind.Warning,
+                                    "Changing the Workspace repair approach",
+                                    "The targeted edit returned without changing the source. Ali is continuing with an exact read and complete-file write instead of ending the turn.");
                             }
                             else
                             {
-                                repeatedBehaviorRepairAttempts = 0;
                                 behaviorFullRewriteFocused = false;
                             }
                             lastRejectedBehaviorRevision = completionGate.SourceRevision;
@@ -1415,32 +1403,41 @@ internal sealed class AliAgentHarnessRunner : IDisposable
                             requirements.RequiresWorkspaceMutation
                             && completionGate.SourceRevision == 0
                             && !behaviorRepairFocused;
-                        if (string.Equals(
-                            lastBlockedFingerprint,
-                            blocker.Fingerprint,
-                            StringComparison.Ordinal)
-                            && lastBlockedSourceRevision == completionGate.SourceRevision)
+                        var repeatedBlocker = string.Equals(
+                                                  lastBlockedFingerprint,
+                                                  blocker.Fingerprint,
+                                                  StringComparison.Ordinal)
+                                              && lastBlockedSourceRevision == completionGate.SourceRevision;
+                        if (repeatedBlocker)
                         {
                             if (!startFocusedMutationRepair)
                             {
+                                behaviorRepairFocused |= requirements.RequiresWorkspaceMutation;
+                                behaviorFullRewriteFocused = requirements.RequiresWorkspaceMutation;
                                 turn.Report(
-                                    AgentActivityKind.Error,
-                                    "Workspace work stopped after no progress",
-                                    "Two bounded tool passes returned the same unresolved state without a successful source change. Ali is reporting the exact obstacle instead of looping.");
-                                renderedAnswer.Append(blocker.TruthfulFailureAnswer);
-                                completedSuccessfully = false;
-                                finalWorkspaceReportRequested = true;
-                                break;
+                                    AgentActivityKind.Warning,
+                                    "Changing the Workspace repair approach",
+                                    requirements.RequiresWorkspaceMutation
+                                        ? "The previous pass returned the same blocker without changing the source. Ali is continuing with an exact read and complete-file write instead of ending the turn."
+                                        : "The previous pass returned the same blocker. Ali is retaining the evidence, changing the next action, and continuing instead of ending the turn.");
                             }
-
-                            turn.Report(
-                                AgentActivityKind.Warning,
-                                "Focusing on the required source change",
-                                "Ali is retaining the exact request and current source evidence while narrowing the next pass to read, mutation, Roslyn, build, test, and run tools.");
+                            else
+                            {
+                                turn.Report(
+                                    AgentActivityKind.Warning,
+                                    "Focusing on the required source change",
+                                    "Ali is retaining the exact request and current source evidence while narrowing the next pass to read, mutation, Roslyn, build, test, and run tools.");
+                            }
+                        }
+                        else
+                        {
+                            behaviorFullRewriteFocused = false;
                         }
 
                         behaviorRepairFocused |= startFocusedMutationRepair;
-                        requiredFocusedToolName = RequiredCoreToolFor(blocker);
+                        requiredFocusedToolName = behaviorFullRewriteFocused
+                            ? AliCapabilityCatalog.FileWriteName
+                            : RequiredCoreToolFor(blocker);
                         lastBlockedFingerprint = blocker.Fingerprint;
                         lastBlockedSourceRevision = completionGate.SourceRevision;
                         turn.Report(
@@ -1451,7 +1448,10 @@ internal sealed class AliAgentHarnessRunner : IDisposable
                         [
                             new MeaiChatMessage(
                                 MeaiChatRole.User,
-                                blocker.ContinuationInstruction)
+                                behaviorFullRewriteFocused
+                                    ? blocker.ContinuationInstruction
+                                      + " The previous targeted mutation returned without changing the source. Read the exact relevant file once if needed, then use file_access_write to replace the complete relevant source file with the corrected implementation. Keep working through a successful current build and launch; do not end the turn merely because the blocker repeated."
+                                    : blocker.ContinuationInstruction)
                         ];
                         continue;
                     }
