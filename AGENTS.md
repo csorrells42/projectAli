@@ -1,3 +1,24 @@
+# ================================================================
+# HARD REPOSITORY RULE: ONE SOURCE OF TRUTH
+# ================================================================
+
+Project Ali has exactly one authoritative repository path, worktree, and branch:
+
+- Repository and worktree: `C:\Users\clsor\Documents\Codex\ProjectAli`
+- Branch: `master`
+
+All normal work is committed directly to `master`. Do not create another branch,
+worktree, clone, checkpoint lane, or alternate source directory unless Chris
+explicitly requests that exact exception.
+
+If Chris explicitly authorizes a temporary branch, integration is not complete
+until the branch has been merged into `master`, `master` has been verified and
+pushed, and the temporary local branch, remote branch, and worktree have all been
+removed. Never leave repository debris behind after integration.
+
+Before changing any file, verify the repository root and current branch. If the
+checkout is not the canonical path on `master`, stop and report the mismatch.
+
 # Project Ali Codex completion gate
 
 Before finishing any turn that changes this repository, perform a final scope-and-trust review. Do not return a completion message until every applicable condition below is true.
