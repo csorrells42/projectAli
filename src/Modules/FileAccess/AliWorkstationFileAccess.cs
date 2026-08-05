@@ -280,7 +280,7 @@ public sealed class AliWorkstationFileAccess
         {
             new AliWorkstationFileMount("Workspace", workspace)
         };
-        var store = new AliWorkstationFileStore(mounts, Path.Combine(workspace, ".ali-trash"));
+        var store = new AliWorkstationFileStore(mounts, Path.Combine(userDataRoot, "RecoverableTrash"));
         var audit = new AgentFileActionAuditStore(userDataRoot, activeUsers);
         return new AliWorkstationFileAccess(
             store,
