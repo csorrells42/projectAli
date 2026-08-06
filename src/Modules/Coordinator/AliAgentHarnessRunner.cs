@@ -96,6 +96,8 @@ internal sealed class AliAgentHarnessRunner : IDisposable
     private readonly AgentToolPermissionStore _toolPermissions;
     private readonly AliWorkstationFileAccess _fileAccess;
     private readonly SerenaCodingService? _serenaCoding;
+    private readonly McpSourceFileTools _coreSourceFileTools;
+    private readonly IReadOnlyList<AITool> _coreFileTools;
     private readonly AliAgentWorkMemory _workMemory;
     private readonly IActiveUserSession? _activeUsers;
     private readonly Func<CoordinatorTurnContext?> _turnAccessor;
@@ -171,6 +173,8 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         {
             _fileAccess = fileAccess;
             _serenaCoding = serenaCoding;
+            _coreSourceFileTools = new McpSourceFileTools(_fileAccess);
+            _coreFileTools = CreateCoreFileTools(_coreSourceFileTools);
             _baseTools = catalog.Tools.ToArray();
             _protocolTool = OrchestrationProtocolCapability.CreateInvariantFunction();
             _startupAssistantTools = _baseTools
@@ -512,6 +516,50 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         return AliAgentFrameworkMiddleware.WithVisibleLifecycle(agent, _turnAccessor, "Ali");
     }
 
+    // Ali's own fallback coding tools, used only when Serena is unavailable so
+    // a failed external MCP process degrades coding capability instead of
+    // eliminating it entirely. See the Serena-unavailable branch in
+    // RunCoreAssistantAsync.
+    private static IReadOnlyList<AITool> CreateCoreFileTools(McpSourceFileTools provider)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        return
+        [
+            BindCoreFileTool(provider, nameof(McpSourceFileTools.ReadAsync),
+                AliCapabilityCatalog.FileReadName,
+                "Read one UTF-8 text file under Workspace."),
+            BindCoreFileTool(provider, nameof(McpSourceFileTools.WriteCoreAsync),
+                AliCapabilityCatalog.FileWriteName,
+                "Create one new UTF-8 Workspace text file. This tool never overwrites an existing file; use file_access_replace_lines or file_access_append to modify existing source."),
+            BindCoreFileTool(provider, nameof(McpSourceFileTools.ReplaceLinesAsync),
+                AliCapabilityCatalog.FileReplaceLinesName,
+                "Replace an inclusive 1-based line range in one existing Workspace file with new content."),
+            BindCoreFileTool(provider, nameof(McpSourceFileTools.AppendAsync),
+                McpSourceFileTools.AppendToolName,
+                "Append supplied UTF-8 text directly to the end of one existing Workspace file without rewriting its existing contents."),
+            BindCoreFileTool(provider, nameof(McpSourceFileTools.LocateSolutionAsync),
+                McpSourceFileTools.LocateSolutionToolName,
+                "Find solution and C# project files and return Workspace-relative paths formatted for Ali's coding tools.")
+        ];
+    }
+
+    private static AIFunction BindCoreFileTool(
+        McpSourceFileTools provider,
+        string methodName,
+        string toolName,
+        string description)
+    {
+        var method = typeof(McpSourceFileTools)
+            .GetMethods()
+            .Single(candidate => string.Equals(candidate.Name, methodName, StringComparison.Ordinal));
+        return AIFunctionFactory.Create(
+            method,
+            provider,
+            toolName,
+            description,
+            serializerOptions: null);
+    }
+
     private static string BuildCoreAssistantInstructions(
         string assistantName,
         string? serenaInstructions) =>
@@ -522,15 +570,15 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         + "Inspect every tool result, propagate errors truthfully, and keep using appropriate tools until the request is complete or the returned evidence proves it is impossible. "
         + "A request is not impossible merely because it contains many requirements or needs many tool calls. Decompose large work into concrete steps and keep advancing through those steps in the same request. Do not apologize for scope or give up after inspection. "
         + "Before answering, account for every explicitly requested operation and report each operation's verified success, failure, or exact unresolved obstacle. "
-        + "Serena is the complete and authoritative programming toolset. Use Serena's native project, memory, semantic retrieval, editing, refactoring, diagnostics, and shell tools directly; do not claim or search for Ali's retired programming tools. "
-        + "For creation, repair, build, test, launch, or stop requests, perform the requested Workspace operations with Serena; pasted source or instructions are not a substitute for creating or changing the requested files. "
-        + "Keep every source, XAML, project, build, and run operation beneath Serena's activated project directory. Complete the requested multi-file implementation before attempting its first build. "
+        + "Serena is your preferred programming toolset when it is available; use Serena's native project, memory, semantic retrieval, editing, refactoring, diagnostics, and shell tools directly for coding work. If Serena's tools are not offered to you this turn, it is unavailable right now and you have been given Ali's own built-in file tools instead -- use those normally rather than claiming coding is impossible. "
+        + "For creation, repair, build, test, launch, or stop requests, perform the requested Workspace operations with whichever coding tools are actually available to you this turn; pasted source or instructions are not a substitute for creating or changing the requested files. "
+        + "Keep every source, XAML, project, build, and run operation inside the active Workspace project. Complete the requested multi-file implementation before attempting its first build. "
         + "Use the newest installed supported .NET SDK for new projects. Never downgrade an existing TargetFramework unless the human explicitly requested that older compatibility target. "
         + "A successful build proves compilation only. It does not satisfy an explicit request to implement or change source behavior; inspect the behavior, make the requested targeted source change, then rebuild and run when requested. "
-        + "For existing code, prefer Serena's symbol-level retrieval and editing tools over whole-file reads or rewrites; split genuinely large implementations into focused files. "
-        + "Never claim that Workspace GUI launch is blocked by a sandbox. Use Serena's shell tool when launch is requested and report its exact result. Never claim build, test, or launch success unless Serena returned success for the final source. "
+        + "For existing code, prefer symbol-level or targeted retrieval and editing over whole-file reads or rewrites; split genuinely large implementations into focused files. "
+        + "Never claim that Workspace GUI launch is blocked by a sandbox. Use your available shell or run tool when launch is requested and report its exact result. Never claim build, test, or launch success unless a tool actually returned success for the final source. "
         + "Never pause merely because a tool or protocol response is imperfect; recover, choose another available tool, ask one necessary clarification, or explain the exact obstacle. "
-        + "File and command operations must remain inside Serena's activated Workspace project. "
+        + "File and command operations must remain inside the active Workspace project. "
         + "Inside a regular double-quoted C# string literal, write a line break as the two characters backslash-n, never as an actual newline; only a verbatim string (@\"...\") may contain a real line break, and only with every quote doubled. "
         + "When narrating multi-step work, put a blank line between each distinct step, plan point, or shift in topic; never run separate sentences like \"Let me do X. Now let me do Y.\" together with only a space, since that reads as one unreadable block. "
         + AliToolCatalog.TypoInterpretationInstruction
@@ -538,6 +586,16 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             ? string.Empty
             : " Serena server instructions: " + serenaInstructions.Trim());
 
+    // GUARDRAIL, do not remove: this method's ChatOptions below sets
+    // SuppressInjectedPersona = true. That is acceptable ONLY because this
+    // call's output (CoreAssistantCodingRequirements) is consumed purely as an
+    // internal routing decision -- which tool drawers to open for this turn.
+    // Its DirectAnswer field must never be shown to the user as Ali's answer.
+    // A future change did exactly that (published this suppressed-persona text
+    // directly as the chat response) and it silently erased Ali's personality
+    // from ordinary conversation. Any code path that could cause this method's
+    // output to reach the user directly is a bug -- Ali's real answer must
+    // always come from the full persona-carrying agent, never from here.
     private static async Task<CoreAssistantCodingRequirements> ClassifyCoreCodingRequirementsAsync(
         IChatClient chatClient,
         IReadOnlyList<MeaiChatMessage> input,
@@ -1166,36 +1224,19 @@ internal sealed class AliAgentHarnessRunner : IDisposable
                 input,
                 cancellationToken)
             .ConfigureAwait(false);
-        if (!requirements.RequiresWorkspaceWork
-            && !requirements.RequiresCurrentWeb
-            && !requirements.RequiresMemoryRecall
-            && !string.IsNullOrWhiteSpace(requirements.DirectAnswer))
-        {
-            var directAnswer = requirements.DirectAnswer.Trim();
-            turn.PublishResponseText(directAnswer);
-            var directPublication = new FinalAnswerPublication(
-                turn.ConversationId,
-                turn.UserMessageId,
-                turn.AssistantMessageId,
-                "publication_" + turn.AssistantMessageId,
-                directAnswer,
-                TurnStateIntegrity.Digest(directAnswer),
-                EvidenceStatus.Unverified,
-                ChatFinishReason.Stop.ToString());
-            var directAcknowledgment = await publishFinal(
-                    directPublication,
-                    cancellationToken)
-                .ConfigureAwait(false);
-            FinalAnswerPublicationBoundary.RequireExactInMemoryAcknowledgment(
-                directPublication,
-                directAcknowledgment);
-            return new AgentHarnessRunResult(
-                WroteAnswer: true,
-                FinishReason: ChatFinishReason.Stop.ToString(),
-                Paused: false,
-                ResumeIdentity: null,
-                CompletedSuccessfully: true);
-        }
+
+        // ClassifyCoreCodingRequirementsAsync exists ONLY to decide which tool
+        // drawers this turn needs; it is a narrow internal judgment call and its
+        // ChatOptions deliberately set SuppressInjectedPersona = true for that
+        // reason. Its own DirectAnswer text must NEVER be published to the user
+        // as Ali's answer -- doing so silently strips her real persona and
+        // instructions from ordinary conversation. A prior change did exactly
+        // that (short-circuited plain chat straight to this suppressed text) and
+        // it was a real regression: identity questions like "who are you" and
+        // ordinary chat lost her personality entirely. Do not reintroduce this.
+        // The classifier's DirectAnswer is intentionally unused below; every
+        // real answer must come from AliMinimumMessage running against the
+        // full persona-carrying agent built further down in this method.
 
         var selectedNames = new HashSet<string>(StringComparer.Ordinal);
         if (requirements.RequiresCurrentWeb)
@@ -1211,22 +1252,29 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         var serenaTools = requirements.RequiresWorkspaceWork
             ? _serenaCoding?.Tools ?? Array.Empty<AITool>()
             : Array.Empty<AITool>();
+        // Serena is preferred when it is actually up, but coding capability must
+        // never drop to zero just because one external process failed to start.
+        // Ali's own native file tools are the fallback so a Serena outage is a
+        // capability downgrade, not a total coding failure.
+        var usingNativeFallback = requirements.RequiresWorkspaceWork && serenaTools.Count == 0;
+        var workspaceTools = usingNativeFallback
+            ? _coreFileTools
+            : serenaTools;
         var activeTools = _startupAssistantTools
             .Where(tool => tool is AIFunctionDeclaration function
                 && selectedNames.Contains(function.Name))
             .Select(tool => tool is CapabilityPermissionProjectionAIFunction permissionProjection
                 ? (AITool)permissionProjection.ProjectWithoutApproval()
                 : tool)
-            .Concat(serenaTools)
+            .Concat(workspaceTools)
             .ToArray();
-        if (requirements.RequiresWorkspaceWork
-            && _serenaCoding is not null
-            && serenaTools.Count == 0)
+        if (usingNativeFallback)
         {
             turn.Report(
                 AgentActivityKind.Warning,
-                "Serena coding tools unavailable",
-                _serenaCoding.Status.Detail);
+                "Serena unavailable, using native file tools",
+                _serenaCoding?.Status.Detail
+                    ?? "Serena is not configured; using Ali's built-in file tools instead.");
         }
         var agent = CreateAgent(
             dispatch.ChatClient,
