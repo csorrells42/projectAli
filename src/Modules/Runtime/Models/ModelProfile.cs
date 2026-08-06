@@ -18,6 +18,8 @@ public sealed record ModelProfile(
     bool SupportsToolCalls,
     bool IsLastKnownGood)
 {
+    public int MaximumToolActionsPerRequest { get; init; } = 512;
+
     public string ProtocolIdentity { get; init; } = RuntimeProtocolIdentities.ChatOnly;
 
     public string CapabilityProfileIdentity { get; init; } = "unprobed";

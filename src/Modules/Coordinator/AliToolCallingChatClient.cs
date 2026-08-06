@@ -41,8 +41,6 @@ internal sealed class AliToolCallingChatClient(
     private const int MaximumAuditEvidenceCharacters = 1800;
     private const int MaximumAuditEvidenceMessages = 5;
     private const int MaximumCriticOutputTokens = 512;
-    private const string TextualToolCallPrefix = "[TOOL_CALLS]";
-    private const string TextualToolArgumentsMarker = "[ARGS]";
     private const string ReasoningEffortOverrideKey = "ali.reasoningEffortOverride";
     private const string AnswerContinuationActivityKey = "answer-continuation";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -302,62 +300,10 @@ internal sealed class AliToolCallingChatClient(
             return response;
         }
 
-        var raw = response.Text?.Trim() ?? string.Empty;
-        if (!raw.StartsWith(TextualToolCallPrefix, StringComparison.Ordinal)
-            || raw.IndexOf(TextualToolCallPrefix, TextualToolCallPrefix.Length, StringComparison.Ordinal) >= 0)
-        {
-            return response;
-        }
-
-        var argumentsMarkerIndex = raw.IndexOf(
-            TextualToolArgumentsMarker,
-            TextualToolCallPrefix.Length,
-            StringComparison.Ordinal);
-        if (argumentsMarkerIndex <= TextualToolCallPrefix.Length
-            || raw.IndexOf(
-                TextualToolArgumentsMarker,
-                argumentsMarkerIndex + TextualToolArgumentsMarker.Length,
-                StringComparison.Ordinal) >= 0)
-        {
-            return response;
-        }
-
-        var toolName = raw[TextualToolCallPrefix.Length..argumentsMarkerIndex].Trim();
-        if (toolName.Length == 0
-            || !registeredTools.Any(tool =>
-                string.Equals(tool.Name, toolName, StringComparison.Ordinal)))
-        {
-            return response;
-        }
-
-        var argumentsJson = raw[(argumentsMarkerIndex + TextualToolArgumentsMarker.Length)..].Trim();
-        if (argumentsJson.Length == 0)
-        {
-            return response;
-        }
-
-        try
-        {
-            using var document = JsonDocument.Parse(argumentsJson);
-            if (document.RootElement.ValueKind != JsonValueKind.Object)
-            {
-                return response;
-            }
-
-            var arguments = CopyJsonObjectProperties(
-                document.RootElement,
-                StringComparer.Ordinal);
-            return CopyMetadata(
-                response,
-                new FunctionCallContent(
-                    $"call_{Guid.NewGuid():N}",
-                    toolName,
-                    arguments));
-        }
-        catch (JsonException)
-        {
-            return response;
-        }
+        var promoted = CoreAssistantContextCompactingChatClient.TryParseTextualToolCall(
+            response.Text ?? string.Empty,
+            registeredTools);
+        return promoted is null ? response : CopyMetadata(response, promoted);
     }
 
     private static ChatOptions CreateCompatibilityOptions(

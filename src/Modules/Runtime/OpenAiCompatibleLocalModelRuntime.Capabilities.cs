@@ -173,12 +173,29 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
         DateTimeOffset observedAt,
         CancellationToken cancellationToken)
     {
+        const string toolName = "ali_native_tool_probe";
         const string nonce = "ali-runtime-capability-v1";
-        var probe = AliOrchestrationProtocol.CreateDeclaration([]);
+        var probe = AIFunctionFactory.CreateDeclaration(
+            toolName,
+            "Return the exact nonce supplied by the user. This probe tests ordinary OpenAI-compatible function calling.",
+            JsonSerializer.SerializeToElement(new
+            {
+                type = "object",
+                properties = new
+                {
+                    nonce = new
+                    {
+                        type = "string",
+                        description = "The exact nonce supplied by the user."
+                    }
+                },
+                required = new[] { "nonce" },
+                additionalProperties = false
+            }));
         var options = new ChatOptions
         {
             Tools = [probe],
-            ToolMode = ChatToolMode.RequireSpecific(probe.Name),
+            ToolMode = ChatToolMode.Auto,
             AllowMultipleToolCalls = false,
             MaxOutputTokens = 256,
             AdditionalProperties = new AdditionalPropertiesDictionary
@@ -189,21 +206,35 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
         try
         {
             var response = await GetResponseAsync(
-                    BuildOrchestrationTransportProbeMessages(nonce, native: true),
+                    [new Microsoft.Extensions.AI.ChatMessage(
+                        Microsoft.Extensions.AI.ChatRole.User,
+                        $"Call {toolName} exactly once with nonce set to {nonce}. Do not answer with prose.")],
                     options,
                     cancellationToken)
                 .ConfigureAwait(false);
-            var decoded = AliOrchestrationDecisionDecoder.DecodeNative(response);
-            var returnedNonce = (decoded.Decision?.NextAction as AnswerDirectlyAction)?.Answer;
+            var calls = response.Messages
+                .SelectMany(message => message.Contents)
+                .OfType<FunctionCallContent>()
+                .Where(call => !call.InformationalOnly)
+                .ToArray();
+            var returnedNonce = calls.Length == 1
+                && string.Equals(calls[0].Name, toolName, StringComparison.Ordinal)
+                && calls[0].Arguments?.TryGetValue("nonce", out var nonceValue) == true
+                    ? nonceValue switch
+                    {
+                        string text => text,
+                        JsonElement element when element.ValueKind == JsonValueKind.String => element.GetString(),
+                        _ => nonceValue?.ToString()
+                    }
+                    : TryReadQwenTextualProbeNonce(response.Text, toolName);
+            var supported = string.Equals(returnedNonce, nonce, StringComparison.Ordinal);
             return new RuntimeCapabilityObservation(
-                string.Equals(returnedNonce, nonce, StringComparison.Ordinal)
-                    ? RuntimeCapabilityState.Supported
-                    : RuntimeCapabilityState.Unsupported,
-                "Observed through Ali's production grammar-safe orchestration function-call transport.",
+                supported ? RuntimeCapabilityState.Supported : RuntimeCapabilityState.Unsupported,
+                "Observed through a minimal standard OpenAI-compatible function call.",
                 observedAt,
-                decoded.IsSuccess
-                    ? "Typed production transport and exact decision decoder succeeded."
-                    : decoded.Error ?? "No typed orchestration decision was returned.");
+                supported
+                    ? "The endpoint returned exactly one typed tool call with the exact nonce."
+                    : $"Expected one {toolName} call with the exact nonce, but received neither a typed call nor the strict Qwen text envelope.");
         }
         catch (OperationCanceledException)
         {
@@ -219,6 +250,42 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
                 "The exact native function-call probe was rejected or malformed.",
                 observedAt,
                 exception.GetType().Name);
+        }
+    }
+
+    private static string? TryReadQwenTextualProbeNonce(string? text, string expectedToolName)
+    {
+        const string openMarker = "<tools>";
+        const string closeMarker = "</tools>";
+        var trimmed = text?.Trim() ?? string.Empty;
+        if (!trimmed.StartsWith(openMarker, StringComparison.Ordinal)
+            || !trimmed.EndsWith(closeMarker, StringComparison.Ordinal)
+            || trimmed.IndexOf(openMarker, openMarker.Length, StringComparison.Ordinal) >= 0)
+        {
+            return null;
+        }
+
+        var json = trimmed[openMarker.Length..^closeMarker.Length].Trim();
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object
+                || !root.TryGetProperty("name", out var name)
+                || !string.Equals(name.GetString(), expectedToolName, StringComparison.Ordinal)
+                || !root.TryGetProperty("arguments", out var arguments)
+                || arguments.ValueKind != JsonValueKind.Object
+                || !arguments.TryGetProperty("nonce", out var nonce)
+                || nonce.ValueKind != JsonValueKind.String)
+            {
+                return null;
+            }
+
+            return nonce.GetString();
+        }
+        catch (JsonException)
+        {
+            return null;
         }
     }
 

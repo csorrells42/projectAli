@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using Ali.Modules.Diagnostics;
 using Ali.Modules.Evidence;
 using Ali.Modules.Identity;
 using Ali.Modules.Runtime.Models;
@@ -13,7 +14,7 @@ using Ali;
 
 namespace Ali.Modules.Runtime;
 
-public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime, IModelSwitchAwareRuntime, IReasoningEffortRuntime, Microsoft.Extensions.AI.IChatClient, IBoundModelDispatchSource
+public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRuntime, IModelSwitchAwareRuntime, IReasoningEffortRuntime, IOpenRouterReasoningRuntime, Microsoft.Extensions.AI.IChatClient, IBoundModelDispatchSource
 {
     private const int HealthProbeAttempts = 3;
     private const int HealthProbeOutputTokenLimit = 512;
@@ -42,6 +43,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
     private readonly RuntimeCapabilityProfileStore? _capabilityProfiles;
     private readonly SemaphoreSlim _lemonadeLoadGate = new(1, 1);
     private string _reasoningEffort;
+    private string _openRouterReasoningEffort;
     private int? _lastHealthProbeCompletionTokens;
     private bool _nativeToolCallingAdvertised;
     private int _lemonadeModelPrepared;
@@ -73,6 +75,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
         _apiKeyResolver = apiKeyResolver ?? (() => null);
         _capabilityProfiles = capabilityProfiles;
         _reasoningEffort = OllamaRuntimeSafetyPolicy.ResolveReasoningEffort(options);
+        _openRouterReasoningEffort = NormalizeOpenRouterReasoningEffort(options.OpenRouterReasoningEffort);
         ActiveProfile = options.ToModelProfile(isLastKnownGood: false);
     }
 
@@ -95,6 +98,14 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
             OllamaRuntimeSafetyPolicy.NormalizeGptOssReasoningEffort(effort));
     }
 
+    public string? OpenRouterReasoningEffort =>
+        string.IsNullOrEmpty(Volatile.Read(ref _openRouterReasoningEffort))
+            ? null
+            : Volatile.Read(ref _openRouterReasoningEffort);
+
+    public void SetOpenRouterReasoningEffort(string? effort) =>
+        Volatile.Write(ref _openRouterReasoningEffort, NormalizeOpenRouterReasoningEffort(effort));
+
     BoundModelDispatchSnapshot IBoundModelDispatchSource.CaptureBoundModelDispatch()
     {
         var profile = ActiveProfile with { };
@@ -104,6 +115,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
         var capabilityProfileIdentity = capabilityProfile?.Identity
             ?? profile.CapabilityProfileIdentity;
         var reasoningEffort = ReasoningEffort;
+        var openRouterReasoningEffort = OpenRouterReasoningEffort;
         return new BoundModelDispatchSnapshot(
             this,
             profile,
@@ -138,6 +150,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
                 _options.ThinkingEnabled,
                 reasoningEffort)
             {
+                OpenRouterReasoningEffort = openRouterReasoningEffort,
                 TokenizerIdentity = _options.TokenizerIdentity,
                 RollingWindowMode = _options.RollingWindowMode,
                 ProtocolIdentity = protocolIdentity
@@ -218,6 +231,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
             isHealthCheck,
             isHealthCheck ? HealthProbeOutputTokenLimit : null);
 
+        AliTransportDiagnostics.RecordModelRequest(payload);
         using var response = await SendRuntimeAsync(
             httpRequest,
             HttpCompletionOption.ResponseHeadersRead,
@@ -230,6 +244,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
         if (!response.IsSuccessStatusCode)
         {
             var error = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            AliTransportDiagnostics.RecordModelResponse(error);
             if (isHealthCheck)
             {
                 WriteHealthLog($"response STREAM POST {uri} error={error}");
@@ -253,6 +268,8 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
             {
                 break;
             }
+
+            AliTransportDiagnostics.AppendModelResponseLine(line);
 
             var streamEvent = useNativeOllama
                 ? ExtractNativeOllamaStreamEvent(line)
@@ -831,8 +848,10 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
         httpRequest.Content = new StringContent(payload, Encoding.UTF8, "application/json");
         WriteRequestMetadata(uri, request, stream: false, isHealthCheck, maxTokens);
 
+        AliTransportDiagnostics.RecordModelRequest(payload);
         using var response = await SendRuntimeAsync(httpRequest, cancellationToken).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        AliTransportDiagnostics.RecordModelResponse(body);
         if (isHealthCheck)
         {
             WriteHealthLog($"response POST {uri} status={(int)response.StatusCode} body_chars={body.Length}");
@@ -1137,6 +1156,32 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
         return null;
     }
 
+    private static string NormalizeOpenRouterReasoningEffort(string? effort)
+    {
+        if (string.IsNullOrWhiteSpace(effort))
+        {
+            return string.Empty;
+        }
+
+        return effort.Trim().ToLowerInvariant() switch
+        {
+            "low" => "low",
+            "medium" => "medium",
+            "high" => "high",
+            _ => throw new InvalidOperationException(
+                $"OpenRouter reasoning effort '{effort}' is not supported. Select low, medium, high, or Model default.")
+        };
+    }
+
+    private object? ResolveOpenRouterReasoning(string? effortOverride = null)
+    {
+        var effort = NormalizeOpenRouterReasoningEffort(
+            effortOverride ?? OpenRouterReasoningEffort);
+        return string.IsNullOrEmpty(effort)
+            ? null
+            : new Dictionary<string, object> { ["effort"] = effort };
+    }
+
     private string ResolveOpenAiThinkingDescription() =>
         ModelThinkingPolicy.Describe(
             ThinkingControl,
@@ -1277,14 +1322,39 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
         return new
         {
             model = _options.Model,
+            models = ResolveFallbackModels(),
             messages = messages.ToArray(),
             stream = stream ?? _options.StreamingEnabled,
             max_tokens = requestedMaxTokens,
             temperature = _options.Temperature,
             top_p = _options.TopP,
+            reasoning = ResolveOpenRouterReasoning(),
+            provider = ResolveProviderRouting(),
             chat_template_kwargs = ResolveOpenAiChatTemplateKwargs(),
             think = (bool?)null
         };
+    }
+
+    private string[]? ResolveFallbackModels() =>
+        string.IsNullOrWhiteSpace(_options.FallbackModel)
+            ? null
+            : [_options.FallbackModel.Trim()];
+
+    private object? ResolveProviderRouting()
+    {
+        var providers = new[] { _options.ProviderOnly, _options.FallbackProviderOnly }
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value!.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        return providers.Length == 0
+            ? null
+            : new
+            {
+                only = providers,
+                order = providers,
+                allow_fallbacks = false
+            };
     }
 
     private object BuildNativeOllamaChatPayload(ChatRequest request, bool stream, int? maxTokens)
@@ -1392,8 +1462,24 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
 
     private void ValidateOpenAiCompatiblePayload(
         string payload,
-        string? reasoningEffortOverride = null)
+        string? reasoningEffortOverride = null,
+        string? openRouterReasoningEffortOverride = null)
     {
+        using var document = JsonDocument.Parse(payload);
+        var root = document.RootElement;
+        var expectedOpenRouterEffort = NormalizeOpenRouterReasoningEffort(
+            openRouterReasoningEffortOverride ?? OpenRouterReasoningEffort);
+        if (!string.IsNullOrEmpty(expectedOpenRouterEffort)
+            && (!root.TryGetProperty("reasoning", out var reasoning)
+                || reasoning.ValueKind != JsonValueKind.Object
+                || !reasoning.TryGetProperty("effort", out var effort)
+                || effort.ValueKind != JsonValueKind.String
+                || !string.Equals(effort.GetString(), expectedOpenRouterEffort, StringComparison.Ordinal)))
+        {
+            throw new InvalidOperationException(
+                $"Refusing to send an OpenRouter request without reasoning effort {expectedOpenRouterEffort}.");
+        }
+
         if (ThinkingControl == ModelThinkingControl.None
             || (ThinkingControl == ModelThinkingControl.GemmaSystemPromptToken
                 && !IsLmStudioEndpoint()))
@@ -1401,8 +1487,6 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime : ILocalModelRunti
             return;
         }
 
-        using var document = JsonDocument.Parse(payload);
-        var root = document.RootElement;
         if (!root.TryGetProperty("chat_template_kwargs", out var templateArguments)
             || templateArguments.ValueKind != JsonValueKind.Object)
         {

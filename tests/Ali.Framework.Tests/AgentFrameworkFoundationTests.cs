@@ -94,4 +94,42 @@ public sealed class AgentFrameworkFoundationTests
         Assert.Contains("does not open, modify, delete, offer, or resume them", text, StringComparison.Ordinal);
         Assert.Contains("Activity reports the visible lifecycle", text, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void MinimumMessage_NeverFabricatesAUserMessageOrMasksTheRuntimeFinishReason()
+    {
+        var path = Path.Combine(
+            RepositoryRoot,
+            "src",
+            "Modules",
+            "Coordinator",
+            "AliMinimumMessage.cs");
+        var text = File.ReadAllText(path);
+
+        Assert.DoesNotContain("ChatRole.User", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("blocker.ContinuationInstruction", text, StringComparison.Ordinal);
+        Assert.Contains("nextInput = Array.Empty<ChatMessage>();", text, StringComparison.Ordinal);
+        Assert.Contains("while (completedToolResults < MaximumToolResults)", text, StringComparison.Ordinal);
+        Assert.Contains("finishReason ??= ChatFinishReason.Stop.ToString();", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("finishReason = ChatFinishReason.Stop.ToString();", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CoreCoding_RemovesSerenaOnboardingButKeepsCodingTools()
+    {
+        var onboarding = Microsoft.Extensions.AI.AIFunctionFactory.Create(
+            () => "setup",
+            "onboarding",
+            "Create Serena project memories.");
+        var editFile = Microsoft.Extensions.AI.AIFunctionFactory.Create(
+            (string relative_path) => relative_path,
+            "replace_symbol_body",
+            "Edit a source symbol.");
+
+        var filtered = Ali.Modules.Coordinator.AliAgentHarnessRunner
+            .FilterSerenaToolsForCoreCoding([onboarding, editFile]);
+
+        var retained = Assert.Single(filtered);
+        Assert.Equal("replace_symbol_body", Assert.IsAssignableFrom<Microsoft.Extensions.AI.AIFunctionDeclaration>(retained).Name);
+    }
 }

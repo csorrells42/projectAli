@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Ali.Modules.Diagnostics;
 using Microsoft.Extensions.AI;
 using MeaiChatMessage = Microsoft.Extensions.AI.ChatMessage;
 using MeaiChatRole = Microsoft.Extensions.AI.ChatRole;
@@ -38,8 +39,10 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             request.Content = new StringContent(payload, Encoding.UTF8, "application/json");
 
+            AliTransportDiagnostics.RecordModelRequest(payload);
             using var response = await SendRuntimeAsync(request, cancellationToken).ConfigureAwait(false);
             var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            AliTransportDiagnostics.RecordModelResponse(body);
             if (response.IsSuccessStatusCode)
             {
                 return ParseExtensionsAiResponse(body, useNativeOllama);
@@ -98,6 +101,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
                 useNativeOllama ? "application/x-ndjson" : "text/event-stream"));
             request.Content = new StringContent(payload, Encoding.UTF8, "application/json");
 
+            AliTransportDiagnostics.RecordModelRequest(payload);
             using var response = await SendRuntimeAsync(
                     request,
                     HttpCompletionOption.ResponseHeadersRead,
@@ -106,6 +110,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
             if (!response.IsSuccessStatusCode)
             {
                 var error = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                AliTransportDiagnostics.RecordModelResponse(error);
                 throw new HttpRequestException(
                     FormatChatHttpError(response.StatusCode, error)
                     + " Serialized message roles: "
@@ -122,6 +127,8 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
                 {
                     break;
                 }
+
+                AliTransportDiagnostics.AppendModelResponseLine(line);
 
                 var delta = useNativeOllama
                     ? ExtractNativeOllamaStreamDelta(line)
@@ -443,6 +450,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
                 out var internalRouting)
             && internalRouting is true;
         var boundReasoningEffort = ResolveBoundReasoningEffort(options);
+        var boundOpenRouterReasoningEffort = ResolveBoundOpenRouterReasoningEffort(options);
         var serializedMessages = BuildExtensionsAiMessages(
             messages,
             suppressPersona,
@@ -479,6 +487,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
             : new
             {
                 model = _options.Model,
+                models = ResolveFallbackModels(),
                 messages = serializedMessages,
                 tools = tools.Length == 0 ? null : tools,
                 tool_choice = ResolveToolChoice(
@@ -493,6 +502,8 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
                 max_tokens = maxTokens,
                 temperature = _options.Temperature,
                 top_p = _options.TopP,
+                reasoning = ResolveOpenRouterReasoning(boundOpenRouterReasoningEffort),
+                provider = ResolveProviderRouting(),
                 chat_template_kwargs = ResolveOpenAiChatTemplateKwargs(boundReasoningEffort),
                 think = (bool?)null
             };
@@ -504,7 +515,10 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
         }
         else
         {
-            ValidateOpenAiCompatiblePayload(json, boundReasoningEffort);
+            ValidateOpenAiCompatiblePayload(
+                json,
+                boundReasoningEffort,
+                boundOpenRouterReasoningEffort);
         }
 
         return json;
@@ -525,6 +539,26 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
         {
             throw new InvalidOperationException(
                 "A bound model dispatch supplied an invalid reasoning-effort snapshot.");
+        }
+
+        return boundReasoningEffort;
+    }
+
+    private static string? ResolveBoundOpenRouterReasoningEffort(ChatOptions? options)
+    {
+        if (options?.AdditionalProperties is not { } properties
+            || !properties.TryGetValue(
+                AliInternalModelRoutingProperties.BoundOpenRouterReasoningEffort,
+                out var boundValue))
+        {
+            return null;
+        }
+
+        if (boundValue is not string boundReasoningEffort
+            || string.IsNullOrWhiteSpace(boundReasoningEffort))
+        {
+            throw new InvalidOperationException(
+                "A bound model dispatch supplied an invalid OpenRouter reasoning-effort snapshot.");
         }
 
         return boundReasoningEffort;

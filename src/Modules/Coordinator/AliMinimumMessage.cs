@@ -19,9 +19,6 @@ namespace Ali.Modules.Coordinator;
 internal sealed class AliMinimumMessage
 {
     private const int MaximumToolResults = 64;
-    private const int MaximumBlockedRetries = 3;
-    private const int MaximumEmptyResponseRetries = 2;
-
     // The gate's unconditional post-mutation run check would force a launch after
     // every single source edit, even when nobody asked for one. A model-chosen run
     // that then fails still blocks via run-failed, and an explicit stop still blocks
@@ -46,8 +43,6 @@ internal sealed class AliMinimumMessage
         var gate = new CoreAssistantCompletionGate();
         var answer = new StringBuilder();
         var completedToolResults = 0;
-        var blockedRetries = 0;
-        var emptyResponseRetries = 0;
         var separateNextModelMessage = false;
         string? finishReason = null;
         var nextInput = input;
@@ -110,31 +105,10 @@ internal sealed class AliMinimumMessage
                 if (gate.TryGetBlocker(out var blocker)
                     && !string.Equals(blocker.Code, SkippedBlockerCode, StringComparison.Ordinal))
                 {
-                    blockedRetries++;
-                    if (blockedRetries > MaximumBlockedRetries)
-                    {
-                        answer.Clear();
-                        answer.Append(blocker.TruthfulFailureAnswer);
-                        turn.PublishResponseText(Environment.NewLine + blocker.TruthfulFailureAnswer);
-                        break;
-                    }
-
                     turn.Report(
                         AgentActivityKind.Warning,
                         "Completion not yet verified",
-                        blocker.ContinuationInstruction);
-                    // The live stream already showed the rejected attempt's text and
-                    // is never cleared (unlike the internal answer buffer below), so
-                    // the next attempt needs its own visible break or it runs directly
-                    // into the discarded text with no separator at all.
-                    turn.PublishResponseText(Environment.NewLine + Environment.NewLine);
-                    answer.Clear();
-                    separateNextModelMessage = false;
-                    nextInput =
-                    [
-                        new ChatMessage(ChatRole.User, blocker.ContinuationInstruction)
-                    ];
-                    continue;
+                        $"The model ended with an unverified condition: {blocker.Code}. Ali did not invent a user message to continue it.");
                 }
 
                 break;
@@ -142,33 +116,13 @@ internal sealed class AliMinimumMessage
 
             if (completedToolResults == toolResultsBeforeBurst)
             {
-                emptyResponseRetries++;
-                if (emptyResponseRetries > MaximumEmptyResponseRetries)
-                {
-                    throw new InvalidOperationException(
-                        "The model returned neither a final answer nor a tool result.");
-                }
-
-                turn.Report(
-                    AgentActivityKind.Warning,
-                    "Empty model response",
-                    "The model returned neither a tool call nor a final answer; asking it to continue.");
-                nextInput =
-                [
-                    new ChatMessage(
-                        ChatRole.User,
-                        "Your previous response contained neither a tool call nor a final answer. Choose an available tool for the next concrete step, or give the truthful final answer now.")
-                ];
-                continue;
+                throw new InvalidOperationException(
+                    "The model returned neither a final answer nor a tool result. Ali did not invent a user message to force another response.");
             }
 
-            emptyResponseRetries = 0;
-            nextInput =
-            [
-                new ChatMessage(
-                    ChatRole.User,
-                    "Continue from the new tool result already in this session. Choose the next advancing action or return the truthful final answer.")
-            ];
+            // The session already contains the exact tool result. Continue without
+            // fabricating another user-role message.
+            nextInput = Array.Empty<ChatMessage>();
         }
 
         if (answer.Length == 0)
@@ -178,7 +132,7 @@ internal sealed class AliMinimumMessage
         }
 
         var exactAnswer = FinalAnswerRenderer.Compose(answer.ToString(), turn.WebSources);
-        finishReason = ChatFinishReason.Stop.ToString();
+        finishReason ??= ChatFinishReason.Stop.ToString();
         var publication = new FinalAnswerPublication(
             turn.ConversationId,
             turn.UserMessageId,

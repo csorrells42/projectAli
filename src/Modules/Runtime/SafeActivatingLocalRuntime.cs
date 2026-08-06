@@ -13,7 +13,7 @@ internal sealed class StaleBoundModelDispatchException : InvalidOperationExcepti
     }
 }
 
-public sealed partial class SafeActivatingLocalRuntime : ILocalModelRuntime, IReasoningEffortRuntime, Microsoft.Extensions.AI.IChatClient, IBoundModelDispatchSource
+public sealed partial class SafeActivatingLocalRuntime : ILocalModelRuntime, IReasoningEffortRuntime, IOpenRouterReasoningRuntime, Microsoft.Extensions.AI.IChatClient, IBoundModelDispatchSource
 {
     private readonly ILocalModelRuntime _fallbackRuntime;
     private ILocalModelRuntime? _candidateRuntime;
@@ -68,6 +68,28 @@ public sealed partial class SafeActivatingLocalRuntime : ILocalModelRuntime, IRe
             if (runtime is IReasoningEffortRuntime adjustable && visited.Add(runtime))
             {
                 adjustable.SetReasoningEffort(effort);
+            }
+        }
+    }
+
+    public string? OpenRouterReasoningEffort =>
+        (_activeRuntime as IOpenRouterReasoningRuntime)?.OpenRouterReasoningEffort
+        ?? (_candidateRuntime as IOpenRouterReasoningRuntime)?.OpenRouterReasoningEffort;
+
+    public void SetOpenRouterReasoningEffort(string? effort)
+    {
+        var visited = new HashSet<ILocalModelRuntime>(ReferenceEqualityComparer.Instance);
+        foreach (var runtime in new[]
+                 {
+                     _activeRuntime,
+                     _candidateRuntime,
+                     _lastHealthCheckedRuntime,
+                     _lastKnownGoodRuntime
+                 })
+        {
+            if (runtime is IOpenRouterReasoningRuntime adjustable && visited.Add(runtime))
+            {
+                adjustable.SetOpenRouterReasoningEffort(effort);
             }
         }
     }

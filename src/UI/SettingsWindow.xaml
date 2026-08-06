@@ -509,6 +509,30 @@
                                            AutomationProperties.AutomationId="RuntimeAllowRemoteHttps"
                                            Margin="0,4,0,2"
                                            ToolTip="Remote access is accepted only for OpenAI-compatible/Custom over HTTPS with ordinary certificate validation." />
+                                 <Grid Margin="0,5,0,4">
+                                     <Grid.ColumnDefinitions>
+                                         <ColumnDefinition Width="*" />
+                                         <ColumnDefinition Width="12" />
+                                         <ColumnDefinition Width="*" />
+                                     </Grid.ColumnDefinitions>
+                                     <StackPanel Grid.Column="0">
+                                         <TextBlock Text="Primary provider" Style="{StaticResource FieldLabel}" />
+                                         <TextBox Text="{Binding RuntimeProviderOnlyText, UpdateSourceTrigger=PropertyChanged}"
+                                                  AutomationProperties.AutomationId="RuntimeProviderOnly"
+                                                  Margin="0,2,0,2" />
+                                     </StackPanel>
+                                     <StackPanel Grid.Column="2">
+                                         <TextBlock Text="Fallback provider" Style="{StaticResource FieldLabel}" />
+                                         <TextBox Text="{Binding RuntimeFallbackProviderOnlyText, UpdateSourceTrigger=PropertyChanged}"
+                                                  AutomationProperties.AutomationId="RuntimeFallbackProviderOnly"
+                                                  Margin="0,2,0,2" />
+                                     </StackPanel>
+                                 </Grid>
+                                 <TextBlock Text="Provider pins populate from the selected model owner. Default means endpoint-managed routing; an explicit pin disables provider fallbacks."
+                                            TextWrapping="Wrap"
+                                            FontSize="11"
+                                            Foreground="{StaticResource SubtleTextBrush}"
+                                            Margin="0,0,0,4" />
                                  <TextBlock Text="Remote API key (optional for local endpoints)"
                                             Style="{StaticResource FieldLabel}"
                                             Margin="0,5,0,0" />
@@ -538,6 +562,15 @@
                                 <ComboBox ItemsSource="{Binding RuntimeModelChoices}"
                                           SelectedItem="{Binding SelectedRuntimeModelChoice}"
                                           Margin="0,2,0,4" />
+                                <TextBlock Text="Fallback model" Style="{StaticResource FieldLabel}" />
+                                <TextBox Text="{Binding RuntimeFallbackModelText, UpdateSourceTrigger=PropertyChanged}"
+                                         AutomationProperties.AutomationId="RuntimeFallbackModel"
+                                         Margin="0,2,0,4" />
+                                <TextBlock Text="OpenRouter tries this model only if the primary model returns a fallback-eligible error. Default or empty disables model fallback."
+                                           TextWrapping="Wrap"
+                                           FontSize="11"
+                                           Foreground="{StaticResource SubtleTextBrush}"
+                                           Margin="0,0,0,6" />
                                 <TextBlock Text="{Binding AssistantWillUseSelectedModelText}"
                                            TextWrapping="Wrap"
                                            FontSize="11"
@@ -628,6 +661,37 @@
                                                   Margin="0,0,0,2"
                                                   ToolTip="Sent only when the selected model has a supported thinking control." />
                                         <TextBlock Text="Unsupported models receive no thinking field."
+                                                   TextWrapping="Wrap"
+                                                   FontSize="11"
+                                                   Foreground="{StaticResource SubtleTextBrush}" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <Grid Margin="0,10,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="12" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="Tool actions per request" Style="{StaticResource FieldLabel}" />
+                                        <ComboBox ItemsSource="{Binding RuntimeToolActionLimitChoices}"
+                                                  Text="{Binding RuntimeToolActionLimitText, UpdateSourceTrigger=PropertyChanged}"
+                                                  IsEditable="True"
+                                                  AutomationProperties.AutomationId="RuntimeToolActionLimit"
+                                                  Margin="0,2,0,2" />
+                                        <TextBlock Text="512 by default. Enter another positive finite value if needed; manual Stop remains available."
+                                                   TextWrapping="Wrap"
+                                                   FontSize="11"
+                                                   Foreground="{StaticResource SubtleTextBrush}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="Reasoning effort" Style="{StaticResource FieldLabel}" />
+                                        <ComboBox ItemsSource="{Binding AdaptiveReasoningEffortChoices}"
+                                                  SelectedItem="{Binding SelectedAdaptiveReasoningEffort}"
+                                                  AutomationProperties.AutomationId="RuntimeReasoningEffort"
+                                                  Margin="0,2,0,2" />
+                                        <TextBlock Text="Ali translates this intent into the selected runtime's supported reasoning convention. Model default sends no remote override."
                                                    TextWrapping="Wrap"
                                                    FontSize="11"
                                                    Foreground="{StaticResource SubtleTextBrush}" />

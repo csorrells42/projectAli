@@ -26,10 +26,17 @@ internal sealed class CoreAssistantContextCompactingChatClient(IChatClient inner
     // happen here, against the real streamed text, not a buffered response.
     private const string TextualToolCallPrefix = "[TOOL_CALLS]";
     private const string TextualToolArgumentsMarker = "[ARGS]";
+    private const string QwenToolCallOpenMarker = "<tools>";
+    private const string QwenToolCallCloseMarker = "</tools>";
+    private const string FencedJsonToolCallOpenMarker = "```json";
+    private const string FencedJsonToolCallCloseMarker = "```";
+    private const string BareJsonToolNameProperty = "\"name\"";
+    private const int MaximumBareJsonMarkerPrefixCharacters = 32;
 
     private readonly IChatClient _inner = inner ?? throw new ArgumentNullException(nameof(inner));
     private static readonly AsyncLocal<IReadOnlySet<string>?> FocusedToolNames = new();
     private static readonly AsyncLocal<RequiredToolFocus?> RequiredFocusedTool = new();
+    private static readonly AsyncLocal<IReadOnlySet<string>?> BareJsonToolNames = new();
     private readonly object _turnAnchorSync = new();
     private ChatMessage? _turnAnchor;
 
@@ -51,15 +58,16 @@ internal sealed class CoreAssistantContextCompactingChatClient(IChatClient inner
         var registeredTools = effectiveOptions?.Tools?
             .OfType<AIFunctionDeclaration>()
             .ToArray() ?? [];
+        var bareJsonToolNames = BareJsonToolNames.Value;
+        var scanForBareJsonCall = bareJsonToolNames is { Count: > 0 };
 
-        // Buffer only while the accumulated text could still become (or
-        // already matches the start of) the textual tool-call marker; the
-        // moment it provably can't, flush everything buffered as normal text
-        // and stop intercepting for the rest of this response. This keeps the
-        // added latency to at most the first few characters for ordinary
-        // chat, not the whole response.
+        // Keep only enough trailing text to recognize a marker split across
+        // streaming chunks. Ordinary text remains live with a delay of at most
+        // the longest marker; once a marker appears anywhere, capture that call.
         var buffer = new System.Text.StringBuilder();
-        var intercepting = registeredTools.Length > 0;
+        var scanForTextualCall = registeredTools.Length > 0;
+        var capturingToolCall = false;
+        ChatResponseUpdate? deferredTerminalUpdate = null;
 
         await foreach (var update in _inner
                            .GetStreamingResponseAsync(
@@ -68,7 +76,7 @@ internal sealed class CoreAssistantContextCompactingChatClient(IChatClient inner
                                cancellationToken)
                            .ConfigureAwait(false))
         {
-            if (!intercepting)
+            if (!scanForTextualCall)
             {
                 yield return update;
                 continue;
@@ -78,7 +86,7 @@ internal sealed class CoreAssistantContextCompactingChatClient(IChatClient inner
             {
                 // A real structured tool call (or other content) already
                 // arrived -- this response was never a textual marker.
-                intercepting = false;
+                scanForTextualCall = false;
                 if (buffer.Length > 0)
                 {
                     yield return new ChatResponseUpdate(update.Role, buffer.ToString());
@@ -91,40 +99,187 @@ internal sealed class CoreAssistantContextCompactingChatClient(IChatClient inner
             var deltaText = string.Concat(update.Contents.OfType<TextContent>().Select(c => c.Text));
             if (deltaText.Length == 0)
             {
+                // OpenRouter commonly emits visible content in one SSE chunk
+                // and the terminal finish_reason in a later empty chunk. Keep
+                // that terminal update until any buffered text/tool envelope
+                // has been published; dropping it makes the agent framework
+                // discard the otherwise valid accumulated assistant answer.
+                if (update.FinishReason is not null)
+                {
+                    deferredTerminalUpdate = update;
+                }
                 continue;
             }
+
             buffer.Append(deltaText);
-            var accumulated = buffer.ToString();
-            if (TextualToolCallPrefix.StartsWith(accumulated, StringComparison.Ordinal)
-                || accumulated.StartsWith(TextualToolCallPrefix, StringComparison.Ordinal))
+            if (capturingToolCall)
             {
-                continue; // still could become (or already matches) the marker
+                continue;
             }
 
-            intercepting = false;
-            yield return new ChatResponseUpdate(update.Role, accumulated);
-            buffer.Clear();
+            var accumulated = buffer.ToString();
+            var markerIndex = FindFirstTextualToolCallMarker(accumulated, scanForBareJsonCall);
+            if (markerIndex >= 0)
+            {
+                if (markerIndex > 0)
+                {
+                    yield return new ChatResponseUpdate(update.Role, accumulated[..markerIndex]);
+                    buffer.Remove(0, markerIndex);
+                }
+
+                capturingToolCall = true;
+                continue;
+            }
+
+            var retainedCharacters = LongestMarkerPrefixSuffix(accumulated, scanForBareJsonCall);
+            var charactersToPublish = accumulated.Length - retainedCharacters;
+            if (charactersToPublish > 0)
+            {
+                yield return new ChatResponseUpdate(update.Role, accumulated[..charactersToPublish]);
+                buffer.Remove(0, charactersToPublish);
+            }
         }
 
         if (buffer.Length == 0)
         {
+            if (deferredTerminalUpdate is not null)
+            {
+                yield return deferredTerminalUpdate;
+            }
             yield break;
         }
 
         var raw = buffer.ToString();
-        var promotedCall = TryParseTextualToolCall(raw, registeredTools);
+        if (!capturingToolCall)
+        {
+            yield return new ChatResponseUpdate(ChatRole.Assistant, raw);
+            if (deferredTerminalUpdate is not null)
+            {
+                yield return deferredTerminalUpdate;
+            }
+            yield break;
+        }
+
+        var promotedCall = TryParseTextualToolCall(raw, registeredTools, bareJsonToolNames);
         yield return promotedCall is not null
             ? new ChatResponseUpdate(ChatRole.Assistant, [promotedCall])
             : new ChatResponseUpdate(ChatRole.Assistant, raw);
+        if (deferredTerminalUpdate is not null)
+        {
+            yield return deferredTerminalUpdate;
+        }
     }
 
-    private static FunctionCallContent? TryParseTextualToolCall(
+    internal static FunctionCallContent? TryParseTextualToolCall(
         string raw,
-        IReadOnlyList<AIFunctionDeclaration> registeredTools)
+        IReadOnlyList<AIFunctionDeclaration> registeredTools,
+        IReadOnlySet<string>? bareJsonToolNames = null)
     {
         var trimmed = raw.Trim();
-        if (!trimmed.StartsWith(TextualToolCallPrefix, StringComparison.Ordinal)
-            || trimmed.IndexOf(TextualToolCallPrefix, TextualToolCallPrefix.Length, StringComparison.Ordinal) >= 0)
+        if (trimmed.StartsWith(TextualToolCallPrefix, StringComparison.Ordinal))
+        {
+            return TryParseBracketedToolCall(trimmed, registeredTools);
+        }
+
+        if (trimmed.StartsWith(QwenToolCallOpenMarker, StringComparison.Ordinal))
+        {
+            return TryParseQwenToolCall(trimmed, registeredTools);
+        }
+
+        return trimmed.StartsWith('{') && bareJsonToolNames is not null
+            ? TryParseNameArgumentsObject(trimmed, registeredTools, bareJsonToolNames)
+            : TryParseFencedJsonToolCall(trimmed, registeredTools);
+    }
+
+    private static int FindFirstTextualToolCallMarker(string text, bool scanForBareJsonCall)
+    {
+        var indexes = new[]
+        {
+            text.IndexOf(TextualToolCallPrefix, StringComparison.Ordinal),
+            text.IndexOf(QwenToolCallOpenMarker, StringComparison.Ordinal),
+            text.IndexOf(FencedJsonToolCallOpenMarker, StringComparison.Ordinal)
+        };
+        var framedMarkerIndex = indexes.Where(index => index >= 0).DefaultIfEmpty(-1).Min();
+        if (!scanForBareJsonCall)
+        {
+            return framedMarkerIndex;
+        }
+
+        var bareJsonMarkerIndex = FindFirstBareJsonToolCallMarker(text);
+        return framedMarkerIndex < 0
+            ? bareJsonMarkerIndex
+            : bareJsonMarkerIndex < 0
+                ? framedMarkerIndex
+                : Math.Min(framedMarkerIndex, bareJsonMarkerIndex);
+    }
+
+    private static int FindFirstBareJsonToolCallMarker(string text)
+    {
+        for (var objectStart = text.IndexOf('{'); objectStart >= 0; objectStart = text.IndexOf('{', objectStart + 1))
+        {
+            var propertyStart = objectStart + 1;
+            while (propertyStart < text.Length && char.IsWhiteSpace(text[propertyStart]))
+            {
+                propertyStart++;
+            }
+
+            if (text.AsSpan(propertyStart).StartsWith(BareJsonToolNameProperty, StringComparison.Ordinal))
+            {
+                return objectStart;
+            }
+        }
+
+        return -1;
+    }
+
+    private static int LongestMarkerPrefixSuffix(string text, bool scanForBareJsonCall)
+    {
+        var markers = new[]
+        {
+            TextualToolCallPrefix,
+            QwenToolCallOpenMarker,
+            FencedJsonToolCallOpenMarker
+        };
+        var maximum = Math.Min(text.Length, markers.Max(marker => marker.Length) - 1);
+        for (var length = maximum; length > 0; length--)
+        {
+            var suffix = text[^length..];
+            if (markers.Any(marker => marker.StartsWith(suffix, StringComparison.Ordinal)))
+            {
+                return length;
+            }
+        }
+
+        if (!scanForBareJsonCall)
+        {
+            return 0;
+        }
+
+        var lastObjectStart = text.LastIndexOf('{');
+        if (lastObjectStart < 0
+            || text.Length - lastObjectStart > MaximumBareJsonMarkerPrefixCharacters)
+        {
+            return 0;
+        }
+
+        var propertyStart = lastObjectStart + 1;
+        while (propertyStart < text.Length && char.IsWhiteSpace(text[propertyStart]))
+        {
+            propertyStart++;
+        }
+
+        var possiblePropertyPrefix = text.AsSpan(propertyStart);
+        return possiblePropertyPrefix.Length <= BareJsonToolNameProperty.Length
+            && BareJsonToolNameProperty.AsSpan().StartsWith(possiblePropertyPrefix, StringComparison.Ordinal)
+                ? text.Length - lastObjectStart
+                : 0;
+    }
+
+    private static FunctionCallContent? TryParseBracketedToolCall(
+        string trimmed,
+        IReadOnlyList<AIFunctionDeclaration> registeredTools)
+    {
+        if (trimmed.IndexOf(TextualToolCallPrefix, TextualToolCallPrefix.Length, StringComparison.Ordinal) >= 0)
         {
             return null;
         }
@@ -143,14 +298,96 @@ internal sealed class CoreAssistantContextCompactingChatClient(IChatClient inner
         }
 
         var toolName = trimmed[TextualToolCallPrefix.Length..argumentsMarkerIndex].Trim();
-        if (toolName.Length == 0
-            || !registeredTools.Any(tool => string.Equals(tool.Name, toolName, StringComparison.Ordinal)))
+        var argumentsJson = trimmed[(argumentsMarkerIndex + TextualToolArgumentsMarker.Length)..].Trim();
+        return CreateRegisteredToolCall(toolName, argumentsJson, registeredTools);
+    }
+
+    private static FunctionCallContent? TryParseQwenToolCall(
+        string trimmed,
+        IReadOnlyList<AIFunctionDeclaration> registeredTools)
+    {
+        if (!trimmed.StartsWith(QwenToolCallOpenMarker, StringComparison.Ordinal)
+            || !trimmed.EndsWith(QwenToolCallCloseMarker, StringComparison.Ordinal)
+            || trimmed.IndexOf(
+                QwenToolCallOpenMarker,
+                QwenToolCallOpenMarker.Length,
+                StringComparison.Ordinal) >= 0)
         {
             return null;
         }
 
-        var argumentsJson = trimmed[(argumentsMarkerIndex + TextualToolArgumentsMarker.Length)..].Trim();
-        if (argumentsJson.Length == 0)
+        var envelopeJson = trimmed[
+            QwenToolCallOpenMarker.Length..^QwenToolCallCloseMarker.Length].Trim();
+        return TryParseNameArgumentsObject(envelopeJson, registeredTools);
+    }
+
+    private static FunctionCallContent? TryParseFencedJsonToolCall(
+        string trimmed,
+        IReadOnlyList<AIFunctionDeclaration> registeredTools)
+    {
+        if (!trimmed.StartsWith(FencedJsonToolCallOpenMarker, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var closingMarkerIndex = trimmed.IndexOf(
+            FencedJsonToolCallCloseMarker,
+            FencedJsonToolCallOpenMarker.Length,
+            StringComparison.Ordinal);
+        if (closingMarkerIndex <= FencedJsonToolCallOpenMarker.Length)
+        {
+            return null;
+        }
+
+        var envelopeJson = trimmed[
+            FencedJsonToolCallOpenMarker.Length..closingMarkerIndex].Trim();
+        return TryParseNameArgumentsObject(envelopeJson, registeredTools);
+    }
+
+    private static FunctionCallContent? TryParseNameArgumentsObject(
+        string envelopeJson,
+        IReadOnlyList<AIFunctionDeclaration> registeredTools,
+        IReadOnlySet<string>? allowedToolNames = null)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(envelopeJson);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object
+                || root.EnumerateObject().Count() != 2
+                || !root.TryGetProperty("name", out var name)
+                || name.ValueKind != JsonValueKind.String
+                || !root.TryGetProperty("arguments", out var arguments)
+                || arguments.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            var toolName = name.GetString() ?? string.Empty;
+            if (allowedToolNames is not null && !allowedToolNames.Contains(toolName))
+            {
+                return null;
+            }
+
+            return CreateRegisteredToolCall(
+                toolName,
+                arguments.GetRawText(),
+                registeredTools);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static FunctionCallContent? CreateRegisteredToolCall(
+        string toolName,
+        string argumentsJson,
+        IReadOnlyList<AIFunctionDeclaration> registeredTools)
+    {
+        if (toolName.Length == 0
+            || argumentsJson.Length == 0
+            || !registeredTools.Any(tool => string.Equals(tool.Name, toolName, StringComparison.Ordinal)))
         {
             return null;
         }
@@ -198,6 +435,13 @@ internal sealed class CoreAssistantContextCompactingChatClient(IChatClient inner
             ? null
             : new RequiredToolFocus(requiredToolName);
         return new ToolFocusLease(previousNames, previousRequired);
+    }
+
+    internal static IDisposable AllowBareJsonToolCalls(IReadOnlySet<string>? toolNames)
+    {
+        var previousNames = BareJsonToolNames.Value;
+        BareJsonToolNames.Value = toolNames;
+        return new BareJsonToolCallLease(previousNames);
     }
 
     private static ChatOptions? ApplyToolFocus(ChatOptions? options)
@@ -321,6 +565,19 @@ internal sealed class CoreAssistantContextCompactingChatClient(IChatClient inner
             {
                 FocusedToolNames.Value = previousNames;
                 RequiredFocusedTool.Value = previousRequired;
+            }
+        }
+    }
+
+    private sealed class BareJsonToolCallLease(IReadOnlySet<string>? previousNames) : IDisposable
+    {
+        private int _disposed;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            {
+                BareJsonToolNames.Value = previousNames;
             }
         }
     }

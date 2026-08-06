@@ -206,6 +206,37 @@ public sealed class AliToolCallingChatClientTests
         Assert.Equal(choice.OutputTokenLimits, qwen.OutputTokenLimits);
     }
 
+    [Theory]
+    [InlineData(65_536, 8_192)]
+    [InlineData(16_384, 16_384)]
+    public void AgentHarness_PreservesExactUserSelectedRuntimeTokenLimits(
+        int contextTokens,
+        int outputTokenLimit)
+    {
+        var profile = new ModelProfile(
+            ProfileId: "runtime-settings-truth",
+            DisplayName: "Runtime settings truth",
+            RuntimeLocation: "This PC",
+            RuntimeEndpoint: "http://127.0.0.1:1234/v1/",
+            RuntimeKind: "LM Studio local HTTP",
+            PackageId: "user-selected-model",
+            Family: "local",
+            Size: "user-selected",
+            Quantization: "user-selected",
+            ContextTokens: contextTokens,
+            OutputTokenLimit: outputTokenLimit,
+            Temperature: 0.2,
+            StreamingEnabled: true,
+            SupportsVision: true,
+            SupportsToolCalls: true,
+            IsLastKnownGood: true);
+
+        var limits = AliAgentHarnessRunner.ResolveHarnessTokenLimits(profile);
+
+        Assert.Equal(contextTokens, limits.ContextTokens);
+        Assert.Equal(outputTokenLimit, limits.OutputTokenLimit);
+    }
+
     [Fact]
     public async Task PlainFinalAnswer_IsReturnedWithoutASecondModelPassOrRewrite()
     {

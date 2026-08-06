@@ -133,7 +133,12 @@ public sealed class SerenaCodingService : IAsyncDisposable
                     .AsTask()
                     .WaitAsync(startup.Token)
                     .ConfigureAwait(false);
-                var tools = discovered.Cast<AITool>().ToArray();
+                var tools = discovered
+                    .Cast<AITool>()
+                    .Select(tool => tool is AIFunction function
+                        ? (AITool)new SerenaTransportDiagnosticsAIFunction(function)
+                        : tool)
+                    .ToArray();
                 if (tools.Length == 0)
                 {
                     throw new InvalidOperationException(

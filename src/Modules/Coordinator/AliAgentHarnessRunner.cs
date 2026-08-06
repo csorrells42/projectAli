@@ -44,7 +44,30 @@ internal sealed class AliAgentHarnessRunner : IDisposable
     // Exact repeated tool/argument plans are stopped by the connector; this high
     // ceiling remains only as a final finite-run safety boundary.
     internal const int MaximumToolIterations = int.MaxValue;
-    private const int MinimumMessageToolIterations = 65;
+
+    /// <summary>
+    /// The bound runtime profile is the user's configuration contract. The harness must not
+    /// silently reduce either value for latency, compaction, or presumed safety. If a runtime
+    /// cannot honor the selected limits, that failure must be reported instead of substituting
+    /// different settings behind the Runtime tab's back.
+    /// </summary>
+    internal static (int ContextTokens, int OutputTokenLimit) ResolveHarnessTokenLimits(
+        ModelProfile profile)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        return (profile.ContextTokens, profile.OutputTokenLimit);
+    }
+
+    internal static IReadOnlyList<AITool> FilterSerenaToolsForCoreCoding(
+        IReadOnlyList<AITool> tools)
+    {
+        ArgumentNullException.ThrowIfNull(tools);
+        return tools
+            .Where(tool => tool is not AIFunctionDeclaration function
+                || !string.Equals(function.Name, "onboarding", StringComparison.Ordinal))
+            .ToArray();
+    }
+
     private static readonly IReadOnlySet<string> MinimumCSharpToolNames =
         new HashSet<string>(StringComparer.Ordinal)
         {
@@ -363,7 +386,8 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         AgentOrchestrationSettings orchestrationSettings,
         TerminalCapabilityEnforcementProvider? capabilityEnforcementProvider = null,
         bool coreAssistantPath = false,
-        string? boundReasoningEffort = null)
+        string? boundReasoningEffort = null,
+        string? boundOpenRouterReasoningEffort = null)
     {
         ArgumentNullException.ThrowIfNull(profile);
         AliOutcomeReportingAgentSkillsSource? skillsSource = null;
@@ -401,30 +425,22 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             AllowMultipleToolCalls = false,
             MaxOutputTokens = profile.OutputTokenLimit
         };
-        if (!string.IsNullOrWhiteSpace(boundReasoningEffort))
+        if (!string.IsNullOrWhiteSpace(boundReasoningEffort)
+            || !string.IsNullOrWhiteSpace(boundOpenRouterReasoningEffort))
         {
-            chatOptions.AdditionalProperties = new AdditionalPropertiesDictionary
+            chatOptions.AdditionalProperties = new AdditionalPropertiesDictionary();
+            if (!string.IsNullOrWhiteSpace(boundReasoningEffort))
             {
-                [AliInternalModelRoutingProperties.BoundReasoningEffort] = boundReasoningEffort
-            };
+                chatOptions.AdditionalProperties[AliInternalModelRoutingProperties.BoundReasoningEffort] = boundReasoningEffort;
+            }
+            if (!string.IsNullOrWhiteSpace(boundOpenRouterReasoningEffort))
+            {
+                chatOptions.AdditionalProperties[AliInternalModelRoutingProperties.BoundOpenRouterReasoningEffort] = boundOpenRouterReasoningEffort;
+            }
         }
 
-        var harnessContextWindowTokens = coreAssistantPath
-            ? Math.Min(profile.ContextTokens, Math.Max(4_096, profile.ContextTokens / 4))
-            : profile.ContextTokens;
-        var harnessOutputTokens = coreAssistantPath
-            // A single tool call's arguments (e.g. a full-file rewrite) must fit
-            // entirely within this budget or the streamed JSON gets cut off mid-value
-            // and the whole call fails to parse. 2,048 proved too tight for a
-            // multi-method C# file in practice; 4,096 keeps a real ceiling on
-            // latency while giving legitimate large single-call payloads room to
-            // actually finish instead of reliably failing and needing a retry.
-            ? Math.Min(profile.OutputTokenLimit, Math.Clamp(harnessContextWindowTokens / 4, 512, 4_096))
-            : profile.OutputTokenLimit;
-        if (harnessOutputTokens >= harnessContextWindowTokens)
-        {
-            harnessOutputTokens = Math.Max(1, harnessContextWindowTokens / 4);
-        }
+        var (harnessContextWindowTokens, harnessOutputTokens) =
+            ResolveHarnessTokenLimits(profile);
 
         var harnessClient = coreAssistantPath
             ? new CoreAssistantContextCompactingChatClient(planningClient)
@@ -434,11 +450,9 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             Name = _assistantProfile.AssistantName,
             Description = "Local personal assistant with memory, current web, local library, reminders, identity, clock, private work memory, and approved workstation file tools.",
             // AliMinimumMessage owns one continuous model/tool/result conversation.
-            // Sixty-four tool actions plus the initial model request lets substantial
-            // C# work finish without the artificial four-iteration handoff that
-            // previously returned an empty stream before a tool could run.
+            // The user's Runtime setting is the sole action-count ceiling.
             MaximumIterationsPerRequest = coreAssistantPath
-                ? MinimumMessageToolIterations
+                ? profile.MaximumToolActionsPerRequest
                 : MaximumToolIterations,
 #pragma warning disable MAAI001 // Agent Framework compaction controls are preview in Harness 1.15.
             // Local OpenAI-compatible runtimes can account Harmony/tool payloads much
@@ -1250,7 +1264,8 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             AliCapabilityCatalog.ListCurrentUserMemoriesName,
             AliCapabilityCatalog.MutateParticipantMemoryName
         };
-        var serenaTools = _serenaCoding?.Tools ?? Array.Empty<AITool>();
+        var serenaTools = FilterSerenaToolsForCoreCoding(
+            _serenaCoding?.Tools ?? Array.Empty<AITool>());
         // Serena is preferred when it is actually up -- its tools are more
         // capable and better tested than Ali's own. But coding capability must
         // never drop to zero just because one external process failed to
@@ -1282,9 +1297,17 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             _orchestrationSettings,
             _capabilityEnforcementProvider,
             coreAssistantPath: true,
-            boundReasoningEffort: dispatch.GenerationSettingsBinding.ReasoningEffort);
+            boundReasoningEffort: dispatch.GenerationSettingsBinding.ReasoningEffort,
+            boundOpenRouterReasoningEffort: dispatch.GenerationSettingsBinding.OpenRouterReasoningEffort);
 
         using var coreExecutionScope = AliCoreAssistantExecutionContext.Enter();
+        using var bareJsonToolCallScope = CoreAssistantContextCompactingChatClient.AllowBareJsonToolCalls(
+            usingNativeFallback
+                ? null
+                : serenaTools
+                    .OfType<AIFunctionDeclaration>()
+                    .Select(tool => tool.Name)
+                    .ToHashSet(StringComparer.Ordinal));
         return await new AliMinimumMessage()
             .RunAsync(turn, agent, input, publishFinal, cancellationToken)
             .ConfigureAwait(false);
@@ -2031,6 +2054,7 @@ internal sealed class AliAgentHarnessRunner : IDisposable
                 modelDispatch.GenerationSettingsBinding.ThinkingControl,
                 modelDispatch.GenerationSettingsBinding.ThinkingEnabled,
                 modelDispatch.GenerationSettingsBinding.ReasoningEffort,
+                modelDispatch.GenerationSettingsBinding.OpenRouterReasoningEffort,
                 modelDispatch.GenerationSettingsBinding.TokenizerIdentity,
                 modelDispatch.GenerationSettingsBinding.RollingWindowMode,
                 modelDispatch.GenerationSettingsBinding.ProtocolIdentity

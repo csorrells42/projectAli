@@ -38,6 +38,16 @@ public sealed record OpenAiCompatibleRuntimeOptions(
 
     public bool CapabilityProbeEnabled { get; init; } = true;
 
+    public int MaximumToolActionsPerRequest { get; init; } = 512;
+
+    public string? OpenRouterReasoningEffort { get; init; }
+
+    public string? ProviderOnly { get; init; }
+
+    public string? FallbackModel { get; init; }
+
+    public string? FallbackProviderOnly { get; init; }
+
     public ModelProfile ToModelProfile(bool isLastKnownGood) =>
         new(
             ProfileId: $"openai-compatible-{Model}-{Quantization}-{ContextTokens}",
@@ -63,6 +73,7 @@ public sealed record OpenAiCompatibleRuntimeOptions(
             SupportsToolCalls: SupportsToolCalls,
             IsLastKnownGood: isLastKnownGood)
         {
+            MaximumToolActionsPerRequest = MaximumToolActionsPerRequest,
             ProtocolIdentity = RuntimeProtocolIdentities.ChatOnly,
             TokenizerIdentity = TokenizerIdentity,
             RollingWindowMode = RollingWindowMode

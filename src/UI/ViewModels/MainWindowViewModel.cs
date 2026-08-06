@@ -41,6 +41,8 @@ namespace Ali.UI.ViewModels;
 public sealed class MainWindowViewModel : ObservableObject
 {
     private const string RuntimeTopPModelDefault = "Model default";
+    private const string OpenRouterReasoningModelDefault = "Model default";
+    private const string RuntimeProviderDefault = "Default";
     internal const int MaximumRuntimeModelInventoryResponseBytes = LocalRuntimeModelInventory.MaximumResponseBytes;
     internal const int MaximumRetainedTurnExecutionReceipts = 16;
     private const string PermissionAllowed = "allowed";
@@ -55,6 +57,8 @@ public sealed class MainWindowViewModel : ObservableObject
     private static readonly JsonSerializerOptions MaintenanceReceiptJsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly string[] RuntimeTemperatureChoiceValues = ["0", "0.1", "0.2", "0.3", "0.5", "0.7", "1", "1.5", "2"];
     private static readonly string[] RuntimeTopPChoiceValues = [RuntimeTopPModelDefault, "0.5", "0.7", "0.8", "0.9", "0.95", "1"];
+    private static readonly string[] RuntimeToolActionLimitChoiceValues = ["64", "128", "256", "512", "1024"];
+    private static readonly string[] AdaptiveReasoningEffortChoiceValues = [OpenRouterReasoningModelDefault, "Low", "Medium", "High"];
     private readonly AliServices _services;
     private readonly ConversationBridgeHost _conversationBridge;
     private readonly NAudioInputLevelMonitor _inputLevelMonitor = new();
@@ -105,16 +109,21 @@ public sealed class MainWindowViewModel : ObservableObject
     private string _runtimeDisplay;
     private string _selectedRuntimeEngine = LocalRuntimeEngines.LmStudio;
     private string _runtimeEndpointText = string.Empty;
+    private string _runtimeProviderOnlyText = RuntimeProviderDefault;
+    private string _runtimeFallbackModelText = string.Empty;
+    private string _runtimeFallbackProviderOnlyText = RuntimeProviderDefault;
     private string _runtimeApiKeyText = string.Empty;
     private bool _runtimeAllowRemoteHttps;
     private string _runtimeModelText = string.Empty;
     private string _runtimeContextText = "2048";
     private string _runtimeOutputLimitText = "256";
+    private string _runtimeToolActionLimitText = "512";
     private string _runtimeTemperatureText = "0.2";
     private string _runtimeTopPText = RuntimeTopPModelDefault;
     private string _runtimeQuantizationText = "Installed package default";
     private string _selectedRuntimeModelChoice = string.Empty;
     private string _selectedReasoningEffort = OllamaRuntimeSafetyPolicy.DefaultGptOssReasoningEffort;
+    private string _selectedAdaptiveReasoningEffort = OpenRouterReasoningModelDefault;
     private string _runtimeSelectionStatusText = "Runtime model list has not been refreshed yet.";
     private bool _runtimeEnabled;
     private bool _runtimeStreamingEnabled = true;
@@ -383,6 +392,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
         ReplaceChoices(RuntimeTemperatureChoices, RuntimeTemperatureChoiceValues);
         ReplaceChoices(RuntimeTopPChoices, RuntimeTopPChoiceValues);
+        ReplaceChoices(RuntimeToolActionLimitChoices, RuntimeToolActionLimitChoiceValues);
+        ReplaceChoices(AdaptiveReasoningEffortChoices, AdaptiveReasoningEffortChoiceValues);
         _runtimeDisplay = FormatRuntimeDisplay();
         LoadRuntimeSettings();
         LoadInternetBackendSettings();
@@ -601,9 +612,13 @@ public sealed class MainWindowViewModel : ObservableObject
 
     public ObservableCollection<string> RuntimeOutputLimitChoices { get; } = new();
 
+    public ObservableCollection<string> RuntimeToolActionLimitChoices { get; } = new();
+
     public ObservableCollection<string> RuntimeTemperatureChoices { get; } = new();
 
     public ObservableCollection<string> RuntimeTopPChoices { get; } = new();
+
+    public ObservableCollection<string> AdaptiveReasoningEffortChoices { get; } = new();
 
     public string AssistantName => _services.AssistantProfile.AssistantName;
 
@@ -1068,6 +1083,32 @@ public sealed class MainWindowViewModel : ObservableObject
         set => SetProperty(ref _runtimeApiKeyText, value);
     }
 
+    public string RuntimeProviderOnlyText
+    {
+        get => _runtimeProviderOnlyText;
+        set => SetProperty(ref _runtimeProviderOnlyText, value);
+    }
+
+    public string RuntimeFallbackModelText
+    {
+        get => _runtimeFallbackModelText;
+        set
+        {
+            if (SetProperty(ref _runtimeFallbackModelText, value)
+                && !_loadingRuntimeOptions
+                && IsConfiguredRuntimeRemote())
+            {
+                RuntimeFallbackProviderOnlyText = InferProviderFromModel(value);
+            }
+        }
+    }
+
+    public string RuntimeFallbackProviderOnlyText
+    {
+        get => _runtimeFallbackProviderOnlyText;
+        set => SetProperty(ref _runtimeFallbackProviderOnlyText, value);
+    }
+
     public bool RuntimeAllowRemoteHttps
     {
         get => _runtimeAllowRemoteHttps;
@@ -1195,6 +1236,12 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    public string RuntimeToolActionLimitText
+    {
+        get => _runtimeToolActionLimitText;
+        set => SetProperty(ref _runtimeToolActionLimitText, value);
+    }
+
     public bool RuntimeToolCallsEnabled
     {
         get => _runtimeToolCallsEnabled;
@@ -1266,6 +1313,19 @@ public sealed class MainWindowViewModel : ObservableObject
             if (value)
             {
                 SelectReasoningEffort("high");
+            }
+        }
+    }
+
+    public string SelectedAdaptiveReasoningEffort
+    {
+        get => _selectedAdaptiveReasoningEffort;
+        set
+        {
+            if (SetProperty(ref _selectedAdaptiveReasoningEffort, value)
+                && !_loadingRuntimeOptions)
+            {
+                SelectAdaptiveReasoningEffort(value);
             }
         }
     }
@@ -2622,9 +2682,10 @@ public sealed class MainWindowViewModel : ObservableObject
             sourceQuestion: text,
             isResponseComplete: false);
 
-        var history = Messages
-            .Select(message => message.ToCoreMessage())
-            .ToList();
+        // Every submitted instruction is authoritative and fire-and-forget.
+        // Keep prior messages in the UI, but never let an interrupted objective
+        // leak into a later request such as "hello" or a different task.
+        IReadOnlyList<ChatMessage> history = Array.Empty<ChatMessage>();
         Messages.Add(userMessage);
         Messages.Add(assistantMessage);
         ClearSubmittedAttachments(Attachments.ToList());
@@ -2806,6 +2867,24 @@ public sealed class MainWindowViewModel : ObservableObject
             SetModelConnectionStatus("model offline", MediaBrushes.Red);
             StatusText = $"Local model communication failed: {ex.Message}";
         }
+        catch (Exception ex)
+        {
+            assistantMessage.EvidenceStatus = EvidenceStatus.Unknown;
+            assistantMessage.AppendResponseText(FormatTurnFailureForChat(
+                ex.Message,
+                hasExistingResponse: !string.IsNullOrWhiteSpace(assistantMessage.Text)));
+            AddAgentActivity(new AssistantStreamChunk(
+                _conversationId,
+                userMessageId,
+                assistantMessageId,
+                "Turn failed",
+                EvidenceStatus.Unknown,
+                IsActivity: true,
+                ActivityKind: AgentActivityKind.Error,
+                ActivityDetail: ex.Message));
+            CancelStreamingSpeech(streamingSpeech);
+            StatusText = $"Turn failed: {ex.Message}";
+        }
         finally
         {
             responseStopwatch.Stop();
@@ -2831,6 +2910,12 @@ public sealed class MainWindowViewModel : ObservableObject
             // Ordinary turns must not reread legacy memory/reminder files on the response path.
             // Their explicit UI commands and background services own refresh work.
         }
+    }
+
+    internal static string FormatTurnFailureForChat(string errorMessage, bool hasExistingResponse)
+    {
+        var separator = hasExistingResponse ? "\n\n" : string.Empty;
+        return $"{separator}Ali could not complete this turn.\n\n{errorMessage}\n\nThe command was not replayed.";
     }
 
     public string TechnologyAcknowledgementsText
@@ -5406,6 +5491,35 @@ public sealed class MainWindowViewModel : ObservableObject
             throw new InvalidOperationException("Max output tokens must be at least 1.");
         }
 
+        if (!int.TryParse(RuntimeToolActionLimitText.Trim(), out var maximumToolActions)
+            || maximumToolActions < 1)
+        {
+            throw new InvalidOperationException("Tool actions per request must be a positive integer.");
+        }
+
+        var adaptiveReasoningEffort = SelectedAdaptiveReasoningEffort.Trim() switch
+        {
+            var value when value.Equals(OpenRouterReasoningModelDefault, StringComparison.OrdinalIgnoreCase) => null,
+            var value when value.Equals("Low", StringComparison.OrdinalIgnoreCase) => "low",
+            var value when value.Equals("Medium", StringComparison.OrdinalIgnoreCase) => "medium",
+            var value when value.Equals("High", StringComparison.OrdinalIgnoreCase) => "high",
+            _ => throw new InvalidOperationException("Reasoning effort must be Model default, Low, Medium, or High.")
+        };
+
+        var openRouterReasoningEffort = LocalEndpointPolicy.IsRemote(endpoint)
+            ? adaptiveReasoningEffort
+            : null;
+        var providerOnly = LocalEndpointPolicy.IsRemote(endpoint)
+            ? RuntimeProviderValue(RuntimeProviderOnlyText)
+            : null;
+        var fallbackModel = LocalEndpointPolicy.IsRemote(endpoint)
+            ? NullIfDefaultOrWhiteSpace(RuntimeFallbackModelText)
+            : null;
+        var fallbackProviderOnly = LocalEndpointPolicy.IsRemote(endpoint) && fallbackModel is not null
+            ? RuntimeProviderValue(RuntimeFallbackProviderOnlyText)
+            : null;
+        var localReasoningEffort = adaptiveReasoningEffort ?? _selectedReasoningEffort;
+
         if (!double.TryParse(RuntimeTemperatureText.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var temperature)
             || temperature < 0
             || temperature > 2)
@@ -5454,16 +5568,44 @@ public sealed class MainWindowViewModel : ObservableObject
             AllowPrivateLanEndpoint: existing.AllowPrivateLanEndpoint)
         {
             Engine = engine,
-            ReasoningEffort = _selectedReasoningEffort,
+            ReasoningEffort = localReasoningEffort,
             ThinkingEnabled = RuntimeThinkingEnabled,
             ThinkingControl = RuntimeThinkingControl,
             AllowRemoteHttpsEndpoint = RuntimeAllowRemoteHttps,
             ApiKeyEnvironmentVariable = existing.ApiKeyEnvironmentVariable,
             TokenizerIdentity = selectedModel?.TokenizerIdentity ?? existing.TokenizerIdentity,
             RollingWindowMode = selectedModel?.RollingWindowMode ?? existing.RollingWindowMode,
-            CapabilityProbeEnabled = existing.CapabilityProbeEnabled
+            CapabilityProbeEnabled = existing.CapabilityProbeEnabled,
+            MaximumToolActionsPerRequest = maximumToolActions,
+            OpenRouterReasoningEffort = openRouterReasoningEffort,
+            ProviderOnly = providerOnly,
+            FallbackModel = fallbackModel,
+            FallbackProviderOnly = fallbackProviderOnly
         });
     }
+
+    private bool IsConfiguredRuntimeRemote() =>
+        Uri.TryCreate(RuntimeEndpointText.Trim(), UriKind.Absolute, out var endpoint)
+        && LocalEndpointPolicy.IsRemote(endpoint);
+
+    private static string InferProviderFromModel(string? model)
+    {
+        var trimmed = model?.Trim();
+        var separator = trimmed?.IndexOf('/') ?? -1;
+        return separator > 0 ? trimmed![..separator] : RuntimeProviderDefault;
+    }
+
+    private static string? RuntimeProviderValue(string? value) =>
+        string.IsNullOrWhiteSpace(value)
+        || value.Trim().Equals(RuntimeProviderDefault, StringComparison.OrdinalIgnoreCase)
+            ? null
+            : value.Trim();
+
+    private static string? NullIfDefaultOrWhiteSpace(string? value) =>
+        string.IsNullOrWhiteSpace(value)
+        || value.Trim().Equals(RuntimeProviderDefault, StringComparison.OrdinalIgnoreCase)
+            ? null
+            : value.Trim();
 
     public async Task AddClipboardImageAsync()
     {
@@ -6846,6 +6988,43 @@ public sealed class MainWindowViewModel : ObservableObject
         }
     }
 
+    private void SelectAdaptiveReasoningEffort(string effort)
+    {
+        var normalized = effort.Trim() switch
+        {
+            var value when value.Equals(OpenRouterReasoningModelDefault, StringComparison.OrdinalIgnoreCase) => OpenRouterReasoningModelDefault,
+            var value when value.Equals("Low", StringComparison.OrdinalIgnoreCase) => "Low",
+            var value when value.Equals("Medium", StringComparison.OrdinalIgnoreCase) => "Medium",
+            var value when value.Equals("High", StringComparison.OrdinalIgnoreCase) => "High",
+            _ => throw new InvalidOperationException("Reasoning effort must be Model default, Low, Medium, or High.")
+        };
+        var runtimeValue = normalized == OpenRouterReasoningModelDefault
+            ? null
+            : normalized.ToLowerInvariant();
+
+        _selectedAdaptiveReasoningEffort = normalized;
+        OnPropertyChanged(nameof(SelectedAdaptiveReasoningEffort));
+        if (runtimeValue is not null)
+        {
+            _selectedReasoningEffort = runtimeValue;
+            NotifyReasoningEffortChanged();
+            _services.RuntimeController.SetReasoningEffort(runtimeValue);
+        }
+        _services.RuntimeController.SetOpenRouterReasoningEffort(runtimeValue);
+
+        try
+        {
+            _services.SaveRuntimeSettings(BuildRuntimeOptionsFromUi());
+            StatusText = runtimeValue is null
+                ? "Reasoning set to Model default. The provider will choose the next request's reasoning level."
+                : $"Reasoning set to {normalized}. The active runtime will use its supported reasoning convention on the next request.";
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Reasoning changed for this session, but could not be saved: {ex.Message}";
+        }
+    }
+
     private string ResolveConfiguredThinkingPreview() =>
         RuntimeThinkingControl switch
         {
@@ -6885,6 +7064,9 @@ public sealed class MainWindowViewModel : ObservableObject
 
         RuntimeEnabled = options.Enabled;
         RuntimeEndpointText = options.Endpoint.ToString();
+        RuntimeProviderOnlyText = options.ProviderOnly ?? RuntimeProviderDefault;
+        RuntimeFallbackModelText = options.FallbackModel ?? string.Empty;
+        RuntimeFallbackProviderOnlyText = options.FallbackProviderOnly ?? RuntimeProviderDefault;
         RuntimeAllowRemoteHttps = options.AllowRemoteHttpsEndpoint;
         RuntimeApiKeyText = _services.LoadRuntimeApiKey() ?? string.Empty;
         var temperatureText = options.Temperature.ToString(CultureInfo.InvariantCulture);
@@ -6901,6 +7083,29 @@ public sealed class MainWindowViewModel : ObservableObject
         _selectedReasoningEffort = OllamaRuntimeSafetyPolicy.NormalizeGptOssReasoningEffort(options.ReasoningEffort);
         NotifyReasoningEffortChanged();
         _services.RuntimeController.SetReasoningEffort(_selectedReasoningEffort);
+        RuntimeToolActionLimitText = options.MaximumToolActionsPerRequest.ToString(CultureInfo.InvariantCulture);
+        _selectedAdaptiveReasoningEffort = options.OpenRouterReasoningEffort switch
+        {
+            null or "" => OpenRouterReasoningModelDefault,
+            "low" => "Low",
+            "medium" => "Medium",
+            "high" => "High",
+            _ => throw new InvalidDataException(
+                $"Saved reasoning effort '{options.OpenRouterReasoningEffort}' is not supported.")
+        };
+        if (options.OpenRouterReasoningEffort is null
+            && options.ThinkingControl == ModelThinkingControl.GptOssReasoningEffort)
+        {
+            _selectedAdaptiveReasoningEffort = _selectedReasoningEffort switch
+            {
+                "low" => "Low",
+                "medium" => "Medium",
+                "high" => "High",
+                _ => OpenRouterReasoningModelDefault
+            };
+        }
+        OnPropertyChanged(nameof(SelectedAdaptiveReasoningEffort));
+        _services.RuntimeController.SetOpenRouterReasoningEffort(options.OpenRouterReasoningEffort);
 
         var selectedLabel = FindRuntimeModelLabel(options.Model);
         if (selectedLabel is null)
@@ -6993,6 +7198,9 @@ public sealed class MainWindowViewModel : ObservableObject
         }
 
         RuntimeModelText = choice.Model;
+        RuntimeProviderOnlyText = IsConfiguredRuntimeRemote()
+            ? InferProviderFromModel(choice.Model)
+            : RuntimeProviderDefault;
         RuntimeThinkingControl = choice.ThinkingControl;
         RuntimeEnabled = !string.IsNullOrWhiteSpace(choice.Model);
         RuntimeStreamingEnabled = choice.StreamingEnabled;

@@ -198,6 +198,17 @@ public sealed class RuntimeProviderCapabilityTests
         Assert.Equal(
             nativeProbeSucceeds,
             AliOrchestrationPlanningClient.RequireBoundEngineeringProtocol(dispatch));
+
+        using var nativeProbeRequest = JsonDocument.Parse(
+            handler.RequestBodies.Single(body => body.Contains("\"tools\"", StringComparison.Ordinal)));
+        var nativeTool = nativeProbeRequest.RootElement
+            .GetProperty("tools")[0]
+            .GetProperty("function");
+        Assert.Equal("ali_native_tool_probe", nativeTool.GetProperty("name").GetString());
+        var nativeParameters = nativeTool.GetProperty("parameters");
+        Assert.Equal("object", nativeParameters.GetProperty("type").GetString());
+        Assert.Equal("nonce", nativeParameters.GetProperty("required")[0].GetString());
+        Assert.False(nativeParameters.GetProperty("additionalProperties").GetBoolean());
     }
 
     [Fact]
@@ -222,6 +233,32 @@ public sealed class RuntimeProviderCapabilityTests
         Assert.Equal(
             RuntimeCapabilityState.Supported,
             health.CapabilityProfile?.StructuredDecision.State);
+    }
+
+    [Fact]
+    public async Task CapabilityProbe_AcceptsStrictQwenTextEnvelopeForTheStandardToolRequest()
+    {
+        var handler = new CapabilityProbeHandler(
+            nativeToolCallSupported: false,
+            textualNativeToolCallSupported: true);
+        using var client = new HttpClient(handler);
+        var options = CreateOptions(new Uri("http://127.0.0.1:1234/v1/")) with
+        {
+            SupportsToolCalls = true,
+            CapabilityProbeEnabled = true
+        };
+        var runtime = new OpenAiCompatibleLocalModelRuntime(client, options);
+
+        var health = await runtime.CheckHealthAsync(TestContext.Current.CancellationToken);
+
+        Assert.True(health.Succeeded, health.Summary);
+        Assert.Equal(
+            RuntimeCapabilityState.Supported,
+            health.CapabilityProfile?.NativeToolCalling.State);
+        Assert.Contains(
+            "minimal standard OpenAI-compatible function call",
+            health.CapabilityProfile?.NativeToolCalling.Provenance,
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -352,6 +389,7 @@ public sealed class RuntimeProviderCapabilityTests
 
     private sealed class CapabilityProbeHandler(
         bool nativeToolCallSupported,
+        bool textualNativeToolCallSupported = false,
         HttpStatusCode? visionFailureStatus = null) : HttpMessageHandler
     {
         public List<string> RequestBodies { get; } = [];
@@ -389,8 +427,12 @@ public sealed class RuntimeProviderCapabilityTests
             if (payload.RootElement.TryGetProperty("tools", out var tools)
                 && tools.ValueKind == JsonValueKind.Array)
             {
-                var decision = PlanningContractTests.DecisionJson(
-                    "{\"kind\":\"answerDirectly\",\"answer\":\"ali-runtime-capability-v1\"}");
+                if (textualNativeToolCallSupported)
+                {
+                    return Completion(
+                        "<tools>{\"name\":\"ali_native_tool_probe\",\"arguments\":{\"nonce\":\"ali-runtime-capability-v1\"}}</tools>");
+                }
+
                 return nativeToolCallSupported
                     ? Json(
                         JsonSerializer.Serialize(new
@@ -411,10 +453,10 @@ public sealed class RuntimeProviderCapabilityTests
                                                 type = "function",
                                                 function = new
                                                 {
-                                                    name = "submit_orchestration_decision",
+                                                    name = "ali_native_tool_probe",
                                                     arguments = JsonSerializer.Serialize(new
                                                     {
-                                                        decisionJson = decision
+                                                        nonce = "ali-runtime-capability-v1"
                                                     })
                                                 }
                                             }

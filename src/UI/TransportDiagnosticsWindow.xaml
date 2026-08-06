@@ -1,0 +1,44 @@
+<Window x:Class="Ali.UI.TransportDiagnosticsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Ali Transport Diagnostics"
+        Width="1100"
+        Height="850"
+        MinWidth="700"
+        MinHeight="600"
+        Background="#111114"
+        Foreground="#F2F2F2"
+        WindowStartupLocation="CenterOwner">
+    <Grid Margin="14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="Most recent Ali → model payload" Margin="0,0,0,6" FontWeight="SemiBold" />
+        <TextBox x:Name="ModelRequestTextBox" Grid.Row="1" Margin="0,0,0,12" IsReadOnly="True"
+                 AcceptsReturn="True" TextWrapping="NoWrap" FontFamily="Consolas"
+                 VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" />
+
+        <TextBlock Grid.Row="2" Text="Most recent model → Ali payload" Margin="0,0,0,6" FontWeight="SemiBold" />
+        <TextBox x:Name="ModelResponseTextBox" Grid.Row="3" Margin="0,0,0,12" IsReadOnly="True"
+                 AcceptsReturn="True" TextWrapping="NoWrap" FontFamily="Consolas"
+                 VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" />
+
+        <TextBlock Grid.Row="4" Text="Most recent Ali → Serena payload" Margin="0,0,0,6" FontWeight="SemiBold" />
+        <TextBox x:Name="SerenaRequestTextBox" Grid.Row="5" Margin="0,0,0,12" IsReadOnly="True"
+                 AcceptsReturn="True" TextWrapping="NoWrap" FontFamily="Consolas"
+                 VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" />
+
+        <TextBlock Grid.Row="6" Text="Most recent Serena → Ali payload" Margin="0,0,0,6" FontWeight="SemiBold" />
+        <TextBox x:Name="SerenaResponseTextBox" Grid.Row="7" IsReadOnly="True"
+                 AcceptsReturn="True" TextWrapping="NoWrap" FontFamily="Consolas"
+                 VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" />
+    </Grid>
+</Window>

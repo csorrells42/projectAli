@@ -94,6 +94,13 @@ public interface IReasoningEffortRuntime
     void SetReasoningEffort(string effort);
 }
 
+public interface IOpenRouterReasoningRuntime
+{
+    string? OpenRouterReasoningEffort { get; }
+
+    void SetOpenRouterReasoningEffort(string? effort);
+}
+
 /// <summary>
 /// Internal request properties shared by model-facing orchestration lanes. The runtime consumes
 /// these mechanically; they are not user prompt text and never select a tool or interpret intent.
@@ -102,6 +109,7 @@ internal static class AliInternalModelRoutingProperties
 {
     internal const string SuppressInjectedPersona = "ali.internalRouting";
     internal const string BoundReasoningEffort = "ali.boundReasoningEffort";
+    internal const string BoundOpenRouterReasoningEffort = "ali.boundOpenRouterReasoningEffort";
 }
 
 internal sealed record BoundRuntimeBindingMaterial(
@@ -138,6 +146,8 @@ internal sealed record BoundGenerationSettingsBindingMaterial(
     bool? ThinkingEnabled,
     string ReasoningEffort)
 {
+    public string? OpenRouterReasoningEffort { get; init; }
+
     public string TokenizerIdentity { get; init; } = "provider-reported-or-unknown";
 
     public string RollingWindowMode { get; init; } = "provider-managed";

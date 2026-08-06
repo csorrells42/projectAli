@@ -25,6 +25,7 @@ public partial class MainWindow : Window
     private IdentityReviewWindow? _identityReviewWindow;
     private AliIdentityReviewSession? _identityReviewSession;
     private PipelineTimingWindow? _pipelineTimingWindow;
+    private TransportDiagnosticsWindow? _transportDiagnosticsWindow;
     private readonly HashSet<ChatMessageViewModel> _trackedMessages = [];
     private bool _messageScrollScheduled;
     private bool _followMessageOutput = true;
@@ -46,6 +47,23 @@ public partial class MainWindow : Window
         Closing += MainWindow_OnClosing;
         PreviewKeyDown += MainWindow_OnPreviewKeyDown;
         PreviewKeyUp += MainWindow_OnPreviewKeyUp;
+    }
+
+    private void DiagnosticsButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (_transportDiagnosticsWindow is { IsLoaded: true } existing)
+        {
+            existing.Activate();
+            return;
+        }
+
+        var window = new TransportDiagnosticsWindow
+        {
+            Owner = this
+        };
+        window.Closed += (_, _) => _transportDiagnosticsWindow = null;
+        _transportDiagnosticsWindow = window;
+        window.Show();
     }
 
     private void Messages_OnCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
