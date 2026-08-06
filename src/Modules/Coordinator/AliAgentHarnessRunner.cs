@@ -1219,44 +1219,29 @@ internal sealed class AliAgentHarnessRunner : IDisposable
     {
         var input = BuildInitialInput(history, userText, attachments).ToList();
         var dispatch = CaptureBoundModelDispatch();
-        var requirements = await ClassifyCoreCodingRequirementsAsync(
-                dispatch.ChatClient,
-                input,
-                cancellationToken)
-            .ConfigureAwait(false);
 
-        // ClassifyCoreCodingRequirementsAsync exists ONLY to decide which tool
-        // drawers this turn needs; it is a narrow internal judgment call and its
-        // ChatOptions deliberately set SuppressInjectedPersona = true for that
-        // reason. Its own DirectAnswer text must NEVER be published to the user
-        // as Ali's answer -- doing so silently strips her real persona and
-        // instructions from ordinary conversation. A prior change did exactly
-        // that (short-circuited plain chat straight to this suppressed text) and
-        // it was a real regression: identity questions like "who are you" and
-        // ordinary chat lost her personality entirely. Do not reintroduce this.
-        // The classifier's DirectAnswer is intentionally unused below; every
-        // real answer must come from AliMinimumMessage running against the
-        // full persona-carrying agent built further down in this method.
-
-        var selectedNames = new HashSet<string>(StringComparer.Ordinal);
-        if (requirements.RequiresCurrentWeb)
+        // No upfront classifier call here. One used to run before every single
+        // turn -- chat included -- purely to decide which tool drawers to
+        // open, costing a full extra model round-trip every time for a
+        // marginal prompt-size saving. Offering a tool the model doesn't need
+        // costs essentially nothing: a well-behaved model simply doesn't call
+        // it. So every category is offered unconditionally, and the only real
+        // per-turn decision left -- Serena vs. Ali's native file tools -- is a
+        // free, instant, in-memory check below, not a model call.
+        var selectedNames = new HashSet<string>(StringComparer.Ordinal)
         {
-            selectedNames.Add(AliCapabilityCatalog.SearchCurrentWebName);
-        }
-        if (requirements.RequiresMemoryRecall)
-        {
-            selectedNames.Add(AliCapabilityCatalog.RecallUserMemoryName);
-            selectedNames.Add(AliCapabilityCatalog.ListCurrentUserMemoriesName);
-            selectedNames.Add(AliCapabilityCatalog.MutateParticipantMemoryName);
-        }
-        var serenaTools = requirements.RequiresWorkspaceWork
-            ? _serenaCoding?.Tools ?? Array.Empty<AITool>()
-            : Array.Empty<AITool>();
-        // Serena is preferred when it is actually up, but coding capability must
-        // never drop to zero just because one external process failed to start.
-        // Ali's own native file tools are the fallback so a Serena outage is a
-        // capability downgrade, not a total coding failure.
-        var usingNativeFallback = requirements.RequiresWorkspaceWork && serenaTools.Count == 0;
+            AliCapabilityCatalog.SearchCurrentWebName,
+            AliCapabilityCatalog.RecallUserMemoryName,
+            AliCapabilityCatalog.ListCurrentUserMemoriesName,
+            AliCapabilityCatalog.MutateParticipantMemoryName
+        };
+        var serenaTools = _serenaCoding?.Tools ?? Array.Empty<AITool>();
+        // Serena is preferred when it is actually up -- its tools are more
+        // capable and better tested than Ali's own. But coding capability must
+        // never drop to zero just because one external process failed to
+        // start. Ali's own native file tools are the fallback so a Serena
+        // outage is a capability downgrade, not a total coding failure.
+        var usingNativeFallback = serenaTools.Count == 0;
         var workspaceTools = usingNativeFallback
             ? _coreFileTools
             : serenaTools;
@@ -1268,13 +1253,12 @@ internal sealed class AliAgentHarnessRunner : IDisposable
                 : tool)
             .Concat(workspaceTools)
             .ToArray();
-        if (usingNativeFallback)
+        if (usingNativeFallback && _serenaCoding is not null)
         {
             turn.Report(
                 AgentActivityKind.Warning,
                 "Serena unavailable, using native file tools",
-                _serenaCoding?.Status.Detail
-                    ?? "Serena is not configured; using Ali's built-in file tools instead.");
+                _serenaCoding.Status.Detail);
         }
         var agent = CreateAgent(
             dispatch.ChatClient,
