@@ -1,6 +1,9 @@
 ﻿using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Collections.Specialized;
+using System.ComponentModel;
+using System.Windows.Threading;
 using Ali.Modules.Interaction;
 using Ali.Modules.Storage;
 using Ali.UI.ViewModels;
@@ -11,6 +14,7 @@ namespace Ali.UI;
 
 public partial class MainWindow : Window
 {
+    private const double MessageScrollBottomTolerance = 24;
     private static readonly TimeSpan StartupCloseWait = TimeSpan.FromMilliseconds(750);
     private static readonly TimeSpan ShutdownCloseWait = TimeSpan.FromMilliseconds(1500);
     private bool _allowClose;
@@ -21,20 +25,133 @@ public partial class MainWindow : Window
     private IdentityReviewWindow? _identityReviewWindow;
     private AliIdentityReviewSession? _identityReviewSession;
     private PipelineTimingWindow? _pipelineTimingWindow;
+    private readonly HashSet<ChatMessageViewModel> _trackedMessages = [];
+    private bool _messageScrollScheduled;
+    private bool _followMessageOutput = true;
+    private bool _isProgrammaticMessageScroll;
 
     public MainWindow(MainWindowViewModel viewModel)
     {
         NativeTitleBarTheme.ApplyDarkTitleBar(this);
         InitializeComponent();
         DataContext = viewModel;
-        viewModel.Messages.CollectionChanged += (_, _) =>
-            Dispatcher.BeginInvoke(new Action(() => MessagesScrollViewer.ScrollToEnd()));
+        foreach (var message in viewModel.Messages)
+        {
+            TrackMessage(message);
+        }
+        viewModel.Messages.CollectionChanged += Messages_OnCollectionChanged;
         viewModel.AgentActivities.CollectionChanged += (_, _) =>
             Dispatcher.BeginInvoke(new Action(() => AgentActivityScrollViewer.ScrollToEnd()));
         Loaded += MainWindow_OnLoaded;
         Closing += MainWindow_OnClosing;
         PreviewKeyDown += MainWindow_OnPreviewKeyDown;
         PreviewKeyUp += MainWindow_OnPreviewKeyUp;
+    }
+
+    private void Messages_OnCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        if (e.Action == NotifyCollectionChangedAction.Reset)
+        {
+            foreach (var message in _trackedMessages)
+            {
+                message.PropertyChanged -= Message_OnPropertyChanged;
+            }
+            _trackedMessages.Clear();
+
+            if (DataContext is MainWindowViewModel viewModel)
+            {
+                foreach (var message in viewModel.Messages)
+                {
+                    TrackMessage(message);
+                }
+            }
+        }
+        else
+        {
+            if (e.OldItems is not null)
+            {
+                foreach (ChatMessageViewModel message in e.OldItems)
+                {
+                    message.PropertyChanged -= Message_OnPropertyChanged;
+                    _trackedMessages.Remove(message);
+                }
+            }
+
+            if (e.NewItems is not null)
+            {
+                foreach (ChatMessageViewModel message in e.NewItems)
+                {
+                    TrackMessage(message);
+                }
+            }
+        }
+
+        ScheduleMessageScroll();
+    }
+
+    private void TrackMessage(ChatMessageViewModel message)
+    {
+        if (_trackedMessages.Add(message))
+        {
+            message.PropertyChanged += Message_OnPropertyChanged;
+        }
+    }
+
+    private void Message_OnPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(ChatMessageViewModel.Text)
+            or nameof(ChatMessageViewModel.IsResponseComplete))
+        {
+            ScheduleMessageScroll();
+        }
+    }
+
+    private void ScheduleMessageScroll()
+    {
+        if (_messageScrollScheduled || !_followMessageOutput)
+        {
+            return;
+        }
+
+        _messageScrollScheduled = true;
+        Dispatcher.BeginInvoke(
+            DispatcherPriority.Background,
+            new Action(() =>
+            {
+                _messageScrollScheduled = false;
+                if (!_followMessageOutput)
+                {
+                    return;
+                }
+
+                _isProgrammaticMessageScroll = true;
+                try
+                {
+                    MessagesScrollViewer.ScrollToEnd();
+                }
+                finally
+                {
+                    _isProgrammaticMessageScroll = false;
+                }
+            }));
+    }
+
+    private void MessagesScrollViewer_OnScrollChanged(
+        object sender,
+        System.Windows.Controls.ScrollChangedEventArgs e)
+    {
+        if (_isProgrammaticMessageScroll
+            || sender is not System.Windows.Controls.ScrollViewer scrollViewer)
+        {
+            return;
+        }
+
+        if (e.VerticalChange != 0 || e.ViewportHeightChange != 0)
+        {
+            _followMessageOutput =
+                scrollViewer.ScrollableHeight - scrollViewer.VerticalOffset
+                <= MessageScrollBottomTolerance;
+        }
     }
 
     private async void MainWindow_OnLoaded(object sender, RoutedEventArgs e)

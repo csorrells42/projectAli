@@ -24,6 +24,7 @@ using Ali.Modules.Runtime;
 using Ali.Modules.Runtime.Models;
 using Ali.Modules.UserMemory;
 using Ali.Modules.ToolDiscovery;
+using Ali.Modules.Serena;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using MeaiChatMessage = Microsoft.Extensions.AI.ChatMessage;
@@ -94,8 +95,7 @@ internal sealed class AliAgentHarnessRunner : IDisposable
     private readonly McpClientManager _mcpClients;
     private readonly AgentToolPermissionStore _toolPermissions;
     private readonly AliWorkstationFileAccess _fileAccess;
-    private readonly McpSourceFileTools _coreSourceFileTools;
-    private readonly IReadOnlyList<AITool> _coreFileTools;
+    private readonly SerenaCodingService? _serenaCoding;
     private readonly AliAgentWorkMemory _workMemory;
     private readonly IActiveUserSession? _activeUsers;
     private readonly Func<CoordinatorTurnContext?> _turnAccessor;
@@ -140,7 +140,8 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         TargetStateRegistry? targetStates = null,
         AliExecutionEffectAdapterRegistry? executionAdapters = null,
         AliDurableEffectAdapterRegistry? durableEffects = null,
-        AliFrameworkToolOutcomeSidecar? toolOutcomes = null)
+        AliFrameworkToolOutcomeSidecar? toolOutcomes = null,
+        SerenaCodingService? serenaCoding = null)
     {
         _modelClient = chatClient ?? throw new ArgumentNullException(nameof(chatClient));
         _runtime = runtime;
@@ -169,8 +170,7 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         try
         {
             _fileAccess = fileAccess;
-            _coreSourceFileTools = new McpSourceFileTools(_fileAccess);
-            _coreFileTools = CreateCoreFileTools(_coreSourceFileTools);
+            _serenaCoding = serenaCoding;
             _baseTools = catalog.Tools.ToArray();
             _protocolTool = OrchestrationProtocolCapability.CreateInvariantFunction();
             _startupAssistantTools = _baseTools
@@ -386,7 +386,9 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         var chatOptions = new ChatOptions
         {
             Instructions = coreAssistantPath
-                ? BuildCoreAssistantInstructions(_assistantProfile.AssistantName)
+                ? BuildCoreAssistantInstructions(
+                    _assistantProfile.AssistantName,
+                    _serenaCoding?.ServerInstructions)
                 : AliToolCatalog.BuildInstructions(
                     _assistantProfile.AssistantName,
                     orchestrationSettings),
@@ -510,47 +512,9 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         return AliAgentFrameworkMiddleware.WithVisibleLifecycle(agent, _turnAccessor, "Ali");
     }
 
-    private static IReadOnlyList<AITool> CreateCoreFileTools(McpSourceFileTools provider)
-    {
-        ArgumentNullException.ThrowIfNull(provider);
-        return
-        [
-            BindCoreFileTool(provider, nameof(McpSourceFileTools.ReadAsync),
-                AliCapabilityCatalog.FileReadName,
-                "Read one UTF-8 text file under Workspace."),
-            BindCoreFileTool(provider, nameof(McpSourceFileTools.WriteCoreAsync),
-                AliCapabilityCatalog.FileWriteName,
-                "Create one new UTF-8 Workspace text file. This tool never overwrites an existing file; use file_access_replace_lines or file_access_append to modify existing source."),
-            BindCoreFileTool(provider, nameof(McpSourceFileTools.ReplaceLinesAsync),
-                AliCapabilityCatalog.FileReplaceLinesName,
-                "Replace an inclusive 1-based line range in one existing Workspace file with new content."),
-            BindCoreFileTool(provider, nameof(McpSourceFileTools.AppendAsync),
-                McpSourceFileTools.AppendToolName,
-                "Append supplied UTF-8 text directly to the end of one existing Workspace file without rewriting its existing contents."),
-            BindCoreFileTool(provider, nameof(McpSourceFileTools.LocateSolutionAsync),
-                McpSourceFileTools.LocateSolutionToolName,
-                "Find solution and C# project files and return Workspace-relative paths formatted for Ali's coding tools.")
-        ];
-    }
-
-    private static AIFunction BindCoreFileTool(
-        McpSourceFileTools provider,
-        string methodName,
-        string toolName,
-        string description)
-    {
-        var method = typeof(McpSourceFileTools)
-            .GetMethods()
-            .Single(candidate => string.Equals(candidate.Name, methodName, StringComparison.Ordinal));
-        return AIFunctionFactory.Create(
-            method,
-            provider,
-            toolName,
-            description,
-            serializerOptions: null);
-    }
-
-    private static string BuildCoreAssistantInstructions(string assistantName) =>
+    private static string BuildCoreAssistantInstructions(
+        string assistantName,
+        string? serenaInstructions) =>
         $"You are {assistantName}, a truthful, reliable, fast personal and coding assistant. "
         + "Answer ordinary conversation directly and concisely. "
         + "When the request needs current, personal, stored, local, or tool-produced facts, call the relevant available tool and answer from its result; never invent evidence or falsely claim that a capability is unavailable. "
@@ -558,18 +522,21 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         + "Inspect every tool result, propagate errors truthfully, and keep using appropriate tools until the request is complete or the returned evidence proves it is impossible. "
         + "A request is not impossible merely because it contains many requirements or needs many tool calls. Decompose large work into concrete steps and keep advancing through those steps in the same request. Do not apologize for scope or give up after inspection. "
         + "Before answering, account for every explicitly requested operation and report each operation's verified success, failure, or exact unresolved obstacle. "
-        + "For C# creation, repair, build, test, launch, or stop requests, perform the requested Workspace operations with the available tools; pasted source or instructions are not a substitute for creating or changing the requested files. "
-        + "After dotnet_create_project succeeds, keep every source, XAML, project, build, and run operation under the exact project directory returned by that tool. Complete the requested multi-file implementation before attempting its first build. "
+        + "Serena is the complete and authoritative programming toolset. Use Serena's native project, memory, semantic retrieval, editing, refactoring, diagnostics, and shell tools directly; do not claim or search for Ali's retired programming tools. "
+        + "For creation, repair, build, test, launch, or stop requests, perform the requested Workspace operations with Serena; pasted source or instructions are not a substitute for creating or changing the requested files. "
+        + "Keep every source, XAML, project, build, and run operation beneath Serena's activated project directory. Complete the requested multi-file implementation before attempting its first build. "
         + "Use the newest installed supported .NET SDK for new projects. Never downgrade an existing TargetFramework unless the human explicitly requested that older compatibility target. "
         + "A successful build proves compilation only. It does not satisfy an explicit request to implement or change source behavior; inspect the behavior, make the requested targeted source change, then rebuild and run when requested. "
-        + "For existing source files, read only the line ranges needed and prefer targeted replace or replace-lines edits. Do not rewrite a whole existing source file with the write tool unless targeted edits have proved impossible; split genuinely large implementations into focused files. "
-        + "Never claim that Workspace GUI launch is blocked by a sandbox. When dotnet_run_project is available and launch is requested, call it and report its exact result. Never claim build, test, or launch success unless the corresponding tool returned success for the final source. "
+        + "For existing code, prefer Serena's symbol-level retrieval and editing tools over whole-file reads or rewrites; split genuinely large implementations into focused files. "
+        + "Never claim that Workspace GUI launch is blocked by a sandbox. Use Serena's shell tool when launch is requested and report its exact result. Never claim build, test, or launch success unless Serena returned success for the final source. "
         + "Never pause merely because a tool or protocol response is imperfect; recover, choose another available tool, ask one necessary clarification, or explain the exact obstacle. "
-        + "File operations must remain inside the approved workspace exposed by the file tools. "
+        + "File and command operations must remain inside Serena's activated Workspace project. "
         + "Inside a regular double-quoted C# string literal, write a line break as the two characters backslash-n, never as an actual newline; only a verbatim string (@\"...\") may contain a real line break, and only with every quote doubled. "
-        + "To permanently save something for later, call mutate_participant_memory with Operation Add, the exact Text to remember, a short free-text Category, ClaimKind DirectStatement, EvidenceKind StatedDirectly, Visibility Private, Sensitivity Low unless the content is clearly sensitive, AttributionConfidence 1.0, and SpeakerParticipantReference/ReportedByParticipantReference set to the current user's exact reference from the roster returned by list_current_user_memories (call that first if you do not already have it this turn). Only report something as saved after mutate_participant_memory returns success; if it fails or you cannot resolve a participant reference, say so truthfully instead of claiming it was saved. "
         + "When narrating multi-step work, put a blank line between each distinct step, plan point, or shift in topic; never run separate sentences like \"Let me do X. Now let me do Y.\" together with only a space, since that reads as one unreadable block. "
-        + AliToolCatalog.TypoInterpretationInstruction;
+        + AliToolCatalog.TypoInterpretationInstruction
+        + (string.IsNullOrWhiteSpace(serenaInstructions)
+            ? string.Empty
+            : " Serena server instructions: " + serenaInstructions.Trim());
 
     private static async Task<CoreAssistantCodingRequirements> ClassifyCoreCodingRequirementsAsync(
         IChatClient chatClient,
@@ -1194,21 +1161,73 @@ internal sealed class AliAgentHarnessRunner : IDisposable
     {
         var input = BuildInitialInput(history, userText, attachments).ToList();
         var dispatch = CaptureBoundModelDispatch();
-        var selectedNames = new HashSet<string>(MinimumCSharpToolNames, StringComparer.Ordinal)
+        var requirements = await ClassifyCoreCodingRequirementsAsync(
+                dispatch.ChatClient,
+                input,
+                cancellationToken)
+            .ConfigureAwait(false);
+        if (!requirements.RequiresWorkspaceWork
+            && !requirements.RequiresCurrentWeb
+            && !requirements.RequiresMemoryRecall
+            && !string.IsNullOrWhiteSpace(requirements.DirectAnswer))
         {
-            AliCapabilityCatalog.SearchCurrentWebName,
-            AliCapabilityCatalog.RecallUserMemoryName,
-            AliCapabilityCatalog.ListCurrentUserMemoriesName,
-            AliCapabilityCatalog.MutateParticipantMemoryName
-        };
+            var directAnswer = requirements.DirectAnswer.Trim();
+            turn.PublishResponseText(directAnswer);
+            var directPublication = new FinalAnswerPublication(
+                turn.ConversationId,
+                turn.UserMessageId,
+                turn.AssistantMessageId,
+                "publication_" + turn.AssistantMessageId,
+                directAnswer,
+                TurnStateIntegrity.Digest(directAnswer),
+                EvidenceStatus.Unverified,
+                ChatFinishReason.Stop.ToString());
+            var directAcknowledgment = await publishFinal(
+                    directPublication,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            FinalAnswerPublicationBoundary.RequireExactInMemoryAcknowledgment(
+                directPublication,
+                directAcknowledgment);
+            return new AgentHarnessRunResult(
+                WroteAnswer: true,
+                FinishReason: ChatFinishReason.Stop.ToString(),
+                Paused: false,
+                ResumeIdentity: null,
+                CompletedSuccessfully: true);
+        }
+
+        var selectedNames = new HashSet<string>(StringComparer.Ordinal);
+        if (requirements.RequiresCurrentWeb)
+        {
+            selectedNames.Add(AliCapabilityCatalog.SearchCurrentWebName);
+        }
+        if (requirements.RequiresMemoryRecall)
+        {
+            selectedNames.Add(AliCapabilityCatalog.RecallUserMemoryName);
+            selectedNames.Add(AliCapabilityCatalog.ListCurrentUserMemoriesName);
+            selectedNames.Add(AliCapabilityCatalog.MutateParticipantMemoryName);
+        }
+        var serenaTools = requirements.RequiresWorkspaceWork
+            ? _serenaCoding?.Tools ?? Array.Empty<AITool>()
+            : Array.Empty<AITool>();
         var activeTools = _startupAssistantTools
             .Where(tool => tool is AIFunctionDeclaration function
                 && selectedNames.Contains(function.Name))
             .Select(tool => tool is CapabilityPermissionProjectionAIFunction permissionProjection
                 ? (AITool)permissionProjection.ProjectWithoutApproval()
                 : tool)
-            .Concat(_coreFileTools)
+            .Concat(serenaTools)
             .ToArray();
+        if (requirements.RequiresWorkspaceWork
+            && _serenaCoding is not null
+            && serenaTools.Count == 0)
+        {
+            turn.Report(
+                AgentActivityKind.Warning,
+                "Serena coding tools unavailable",
+                _serenaCoding.Status.Detail);
+        }
         var agent = CreateAgent(
             dispatch.ChatClient,
             dispatch.Profile,

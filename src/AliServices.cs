@@ -18,6 +18,7 @@ using Ali.Modules.Capabilities;
 using Ali.Modules.ToolDiscovery;
 using Ali.Modules.Orchestration.Evidence;
 using Ali.Modules.Orchestration.Observation;
+using Ali.Modules.Serena;
 
 namespace Ali;
 
@@ -55,6 +56,7 @@ public sealed class AliServices
         FileMemoryStore memories,
         FileReminderStore reminders,
         McpClientManager mcpClients,
+        SerenaCodingService serenaCoding,
         McpServerHost mcpServer,
         QdrantServiceManager qdrant,
         LocalVectorLibrarySettingsSnapshotOwner localVectorLibrarySettings,
@@ -93,6 +95,7 @@ public sealed class AliServices
         Memories = memories;
         Reminders = reminders;
         McpClients = mcpClients;
+        SerenaCoding = serenaCoding ?? throw new ArgumentNullException(nameof(serenaCoding));
         McpServer = mcpServer;
         Qdrant = qdrant;
         _localVectorLibrarySettings = localVectorLibrarySettings
@@ -172,6 +175,8 @@ public sealed class AliServices
     public FileReminderStore Reminders { get; }
 
     public McpClientManager McpClients { get; }
+
+    public SerenaCodingService SerenaCoding { get; }
 
     public McpServerHost McpServer { get; }
 
@@ -475,6 +480,13 @@ public sealed class AliServices
         var webResearch = new McpWebResearchClient(
             () => internetSettings.Capture().Settings);
         var mcpClients = new McpClientManager(dataRoot);
+        var workspaceRoot = fileAccess.Mounts
+            .Single(mount => string.Equals(mount.Name, "Workspace", StringComparison.Ordinal))
+            .RootPath;
+        var serenaCoding = new SerenaCodingService(
+            SerenaRuntimeSettings.LoadDefault(),
+            workspaceRoot);
+        serenaCoding.Start();
         var mcpServerToolFactory = new AliMcpServerToolFactory(
             localLibrary,
             webSources,
@@ -522,7 +534,8 @@ public sealed class AliServices
                 userMemories,
                 participantRosterAuthority,
                 participantReceiptAuthority,
-                () => internetSettings.Capture().Settings);
+                () => internetSettings.Capture().Settings,
+                serenaCoding);
             var capabilitySettings = coordinator.CapabilitySettings
                 ?? throw new InvalidOperationException(
                     "Production capability settings were not initialized.");
@@ -553,6 +566,7 @@ public sealed class AliServices
                 memories,
                 reminders,
                 mcpClients,
+                serenaCoding,
                 mcpServer,
                 qdrant,
                 localVectorLibrarySettings,
@@ -573,6 +587,15 @@ public sealed class AliServices
         }
         catch
         {
+            try
+            {
+                serenaCoding.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            }
+            catch
+            {
+                // Preserve the original composition failure.
+            }
+
             try
             {
                 shadowObserver.DisposeAsync().AsTask().GetAwaiter().GetResult();

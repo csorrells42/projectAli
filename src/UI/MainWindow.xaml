@@ -813,7 +813,10 @@
 
             <ScrollViewer x:Name="MessagesScrollViewer"
                           Grid.Row="2"
-                          VerticalScrollBarVisibility="Auto"
+                          VerticalScrollBarVisibility="Visible"
+                          HorizontalScrollBarVisibility="Disabled"
+                          CanContentScroll="False"
+                          ScrollChanged="MessagesScrollViewer_OnScrollChanged"
                           Padding="0,8,0,8">
                 <ItemsControl ItemsSource="{Binding Messages}" MaxWidth="840" HorizontalAlignment="Center">
                     <ItemsControl.ItemTemplate>
@@ -842,6 +845,12 @@
                                             CommandParameter="{Binding}"
                                             Margin="0"
                                             Visibility="{Binding CanFlagAsIncorrect, Converter={StaticResource BoolToVisibilityConverter}}" />
+                                    <TextBlock Text="{Binding ResponseElapsedText}"
+                                               Margin="10,0,0,0"
+                                               Foreground="#74747C"
+                                               FontSize="10"
+                                               VerticalAlignment="Center"
+                                               Visibility="{Binding HasResponseElapsed, Converter={StaticResource BoolToVisibilityConverter}}" />
                                     <TextBlock Text="Flagged for correction"
                                                Margin="10,0,0,0"
                                                Foreground="#FBBF24"

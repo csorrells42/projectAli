@@ -2589,6 +2589,7 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
+        var responseStopwatch = Stopwatch.StartNew();
         IsBusy = true;
         StatusText = "Streaming local response...";
         // DISABLED FOR AliMinimumMessage: previous-turn execution receipts are
@@ -2689,7 +2690,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 if (!answerStarted)
                 {
                     answerStarted = true;
-                    assistantMessage.Text = string.Empty;
+                    assistantMessage.ResetResponseTextForStreaming();
                 }
 
                 assistantMessage.EvidenceStatus = chunk.EvidenceStatus;
@@ -2700,7 +2701,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 {
                     if (!string.IsNullOrEmpty(chunk.Text))
                     {
-                        assistantMessage.Text += chunk.Text;
+                        assistantMessage.AppendResponseText(chunk.Text);
                     }
 
                     if (finalDelivery is not null)
@@ -2776,7 +2777,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (OperationCanceledException)
         {
-            assistantMessage.Text += "\n\nStopped by user.";
+            assistantMessage.AppendResponseText("\n\nStopped by user.");
             AddAgentActivity(new AssistantStreamChunk(
                 _conversationId,
                 userMessageId,
@@ -2791,7 +2792,7 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (HttpRequestException ex)
         {
-            assistantMessage.Text += $"\n\nUnknown: local model communication failed. {ex.Message}";
+            assistantMessage.AppendResponseText($"\n\nUnknown: local model communication failed. {ex.Message}");
             AddAgentActivity(new AssistantStreamChunk(
                 _conversationId,
                 userMessageId,
@@ -2807,6 +2808,8 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         finally
         {
+            responseStopwatch.Stop();
+            assistantMessage.SetResponseElapsed(responseStopwatch.Elapsed);
             assistantMessage.IsResponseComplete = true;
 
             if (!completed)

@@ -1,0 +1,10 @@
+{
+  "enabled": true,
+  "command": "serena",
+  "context": "desktop-app",
+  "transport": "stdio",
+  "startupTimeoutSeconds": 30,
+  "restartDelayMilliseconds": 500,
+  "enableWebDashboard": false,
+  "openWebDashboard": false
+}

@@ -1997,6 +1997,68 @@ public sealed class AliToolCallingChatClientTests
     }
 
     [Fact]
+    public async Task NativeDevstralTextToolCall_IsPromotedOnlyForRegisteredTool()
+    {
+        using var inner = new RecordingChatClient(new ChatResponse(new AIChatMessage(
+            AIChatRole.Assistant,
+            "[TOOL_CALLS]read_file[ARGS]{\"relative_path\":\"MainWindow.xaml\",\"start_line\":0,\"end_line\":-1}")));
+        using var client = new AliToolCallingChatClient(
+            inner,
+            new NativeToolRuntime(),
+            "Ali",
+            () => null,
+            semanticToolCatalog: new BoundedLiveRegistryTestCatalog());
+        var readFile = AIFunctionFactory.Create(
+            (string relative_path, int start_line, int end_line) => "ok",
+            "read_file",
+            "Read a bounded section of a project file.");
+
+        var response = await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, "Inspect the current XAML.")],
+            new ChatOptions { Tools = [readFile] },
+            TestContext.Current.CancellationToken);
+
+        var call = Assert.Single(response.Messages
+            .SelectMany(message => message.Contents)
+            .OfType<FunctionCallContent>());
+        Assert.Equal("read_file", call.Name);
+        Assert.Equal(
+            "MainWindow.xaml",
+            Assert.IsType<JsonElement>(call.Arguments!["relative_path"]).GetString());
+        Assert.Equal(0, Assert.IsType<JsonElement>(call.Arguments["start_line"]).GetInt32());
+        Assert.Equal(-1, Assert.IsType<JsonElement>(call.Arguments["end_line"]).GetInt32());
+    }
+
+    [Fact]
+    public async Task NativeDevstralTextToolCallMarkerInsideOrdinaryAnswer_RemainsText()
+    {
+        const string answer = "A literal example is [TOOL_CALLS]read_file[ARGS]{\"relative_path\":\"example.txt\"}.";
+        using var inner = new RecordingChatClient(new ChatResponse(new AIChatMessage(
+            AIChatRole.Assistant,
+            answer)));
+        using var client = new AliToolCallingChatClient(
+            inner,
+            new NativeToolRuntime(),
+            "Ali",
+            () => null,
+            semanticToolCatalog: new BoundedLiveRegistryTestCatalog());
+        var readFile = AIFunctionFactory.Create(
+            (string relative_path) => "ok",
+            "read_file",
+            "Read a project file.");
+
+        var response = await client.GetResponseAsync(
+            [new AIChatMessage(AIChatRole.User, "Show the marker syntax as text.")],
+            new ChatOptions { Tools = [readFile] },
+            TestContext.Current.CancellationToken);
+
+        Assert.Empty(response.Messages
+            .SelectMany(message => message.Contents)
+            .OfType<FunctionCallContent>());
+        Assert.Equal(answer, response.Text);
+    }
+
+    [Fact]
     public async Task CodingTurnClassifier_UsesOneRequiredTypedModelVerdict()
     {
         var classification = new AIChatMessage(AIChatRole.Assistant, string.Empty);

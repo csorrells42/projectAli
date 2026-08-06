@@ -36,6 +36,8 @@ public partial class App : System.Windows.Application
             _services?.OrchestrationObserver?.DisposeAsync().AsTask().GetAwaiter().GetResult());
         TryShutdown(() => _services?.Orchestrator.Dispose());
         TryShutdown(() =>
+            _services?.SerenaCoding.DisposeAsync().AsTask().GetAwaiter().GetResult());
+        TryShutdown(() =>
             _services?.UserMemories.DisposeAsync().AsTask().GetAwaiter().GetResult());
         TryShutdown(() =>
             _services?.CodingModule.DisposeAsync().AsTask().GetAwaiter().GetResult());

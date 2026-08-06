@@ -11,6 +11,7 @@ public sealed class ChatMessageViewModel : ObservableObject
     private EvidenceStatus _evidenceStatus;
     private bool _isFlaggedForCorrection;
     private bool _isResponseComplete;
+    private string _responseElapsedText = string.Empty;
 
     public ChatMessageViewModel(
         string id,
@@ -76,6 +77,21 @@ public sealed class ChatMessageViewModel : ObservableObject
 
     public bool AreActionsVisible => _isResponseComplete;
 
+    public bool HasResponseElapsed => Role == ChatRole.Assistant
+        && !string.IsNullOrWhiteSpace(_responseElapsedText);
+
+    public string ResponseElapsedText
+    {
+        get => _responseElapsedText;
+        private set
+        {
+            if (SetProperty(ref _responseElapsedText, value))
+            {
+                OnPropertyChanged(nameof(HasResponseElapsed));
+            }
+        }
+    }
+
     public bool IsResponseComplete
     {
         get => _isResponseComplete;
@@ -110,6 +126,39 @@ public sealed class ChatMessageViewModel : ObservableObject
     {
         CorrectionId = correctionId;
         IsFlaggedForCorrection = true;
+    }
+
+    public void SetResponseElapsed(TimeSpan elapsed)
+    {
+        var seconds = Math.Max(0, elapsed.TotalSeconds);
+        ResponseElapsedText = seconds switch
+        {
+            < 10 => $"{seconds:0.0} s",
+            < 60 => $"{seconds:0} s",
+            _ => $"{(int)elapsed.TotalMinutes}:{elapsed.Seconds:00}"
+        };
+    }
+
+    public void ResetResponseTextForStreaming()
+    {
+        if (_text.Length == 0)
+        {
+            return;
+        }
+
+        _text = string.Empty;
+        OnPropertyChanged(nameof(Text));
+    }
+
+    public void AppendResponseText(string responseText)
+    {
+        if (string.IsNullOrEmpty(responseText))
+        {
+            return;
+        }
+
+        _text += responseText;
+        OnPropertyChanged(nameof(Text));
     }
 
     public ChatMessage ToCoreMessage() =>

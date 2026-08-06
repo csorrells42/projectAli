@@ -154,7 +154,10 @@ internal sealed class CoreAssistantContextCompactingChatClient(IChatClient inner
                     MaximumSystemCharacters,
                     "core framework instructions"))
         };
-        result.AddRange(retained.Select(CompactMessage));
+        result.AddRange(retained.Select(message =>
+            anchor is not null && SameMessage(message, anchor)
+                ? message
+                : CompactMessage(message)));
         return result;
     }
 

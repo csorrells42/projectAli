@@ -41,6 +41,8 @@ internal sealed class AliToolCallingChatClient(
     private const int MaximumAuditEvidenceCharacters = 1800;
     private const int MaximumAuditEvidenceMessages = 5;
     private const int MaximumCriticOutputTokens = 512;
+    private const string TextualToolCallPrefix = "[TOOL_CALLS]";
+    private const string TextualToolArgumentsMarker = "[ARGS]";
     private const string ReasoningEffortOverrideKey = "ali.reasoningEffortOverride";
     private const string AnswerContinuationActivityKey = "answer-continuation";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -165,6 +167,7 @@ internal sealed class AliToolCallingChatClient(
             var nativeResponse = await inner
                 .GetResponseAsync(nativeMessages, nativeOptions, cancellationToken)
                 .ConfigureAwait(false);
+            nativeResponse = PromoteRegisteredTextualToolCall(nativeResponse, tools);
             NormalizeNativeFunctionCalls(nativeResponse);
             if (ContainsFunctionCall(nativeResponse)
                 || (turn is null
@@ -287,6 +290,73 @@ internal sealed class AliToolCallingChatClient(
                 : new Dictionary<string, object?>(call.Arguments, StringComparer.Ordinal);
             arguments = NormalizeToolArguments(call.Name, arguments);
             call.Arguments = _toolArgumentNormalizer(call.Name, arguments);
+        }
+    }
+
+    private static ChatResponse PromoteRegisteredTextualToolCall(
+        ChatResponse response,
+        IReadOnlyList<AIFunctionDeclaration> registeredTools)
+    {
+        if (ContainsFunctionCall(response))
+        {
+            return response;
+        }
+
+        var raw = response.Text?.Trim() ?? string.Empty;
+        if (!raw.StartsWith(TextualToolCallPrefix, StringComparison.Ordinal)
+            || raw.IndexOf(TextualToolCallPrefix, TextualToolCallPrefix.Length, StringComparison.Ordinal) >= 0)
+        {
+            return response;
+        }
+
+        var argumentsMarkerIndex = raw.IndexOf(
+            TextualToolArgumentsMarker,
+            TextualToolCallPrefix.Length,
+            StringComparison.Ordinal);
+        if (argumentsMarkerIndex <= TextualToolCallPrefix.Length
+            || raw.IndexOf(
+                TextualToolArgumentsMarker,
+                argumentsMarkerIndex + TextualToolArgumentsMarker.Length,
+                StringComparison.Ordinal) >= 0)
+        {
+            return response;
+        }
+
+        var toolName = raw[TextualToolCallPrefix.Length..argumentsMarkerIndex].Trim();
+        if (toolName.Length == 0
+            || !registeredTools.Any(tool =>
+                string.Equals(tool.Name, toolName, StringComparison.Ordinal)))
+        {
+            return response;
+        }
+
+        var argumentsJson = raw[(argumentsMarkerIndex + TextualToolArgumentsMarker.Length)..].Trim();
+        if (argumentsJson.Length == 0)
+        {
+            return response;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(argumentsJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return response;
+            }
+
+            var arguments = CopyJsonObjectProperties(
+                document.RootElement,
+                StringComparer.Ordinal);
+            return CopyMetadata(
+                response,
+                new FunctionCallContent(
+                    $"call_{Guid.NewGuid():N}",
+                    toolName,
+                    arguments));
+        }
+        catch (JsonException)
+        {
+            return response;
         }
     }
 
@@ -2051,10 +2121,18 @@ internal sealed class AliToolCallingChatClient(
                 var contents = new List<AIContent>();
                 if (!string.IsNullOrWhiteSpace(text))
                 {
-                    contents.Add(new TextContent(CompactContextText(
-                        text,
-                        MaximumConversationMessageCharacters,
-                        message.Role == AIChatRole.Tool ? "tool message" : "conversation message")));
+                    var isCurrentHumanRequest = message.Role == AIChatRole.User
+                        && !string.IsNullOrWhiteSpace(currentUserRequest)
+                        && string.Equals(
+                            text.Trim(),
+                            currentUserRequest.Trim(),
+                            StringComparison.Ordinal);
+                    contents.Add(new TextContent(isCurrentHumanRequest
+                        ? text
+                        : CompactContextText(
+                            text,
+                            MaximumConversationMessageCharacters,
+                            message.Role == AIChatRole.Tool ? "tool message" : "conversation message")));
                 }
 
                 contents.AddRange(dataContents);

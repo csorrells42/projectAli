@@ -17,6 +17,7 @@ using Ali.Modules.Orchestration.Observation;
 using Ali.Modules.Reminders;
 using Ali.Modules.Runtime;
 using Ali.Modules.UserMemory;
+using Ali.Modules.Serena;
 using Ali.Modules.ToolDiscovery;
 using Microsoft.Extensions.AI;
 using RuntimeChatMessage = Ali.Modules.Runtime.ChatMessage;
@@ -68,7 +69,8 @@ public sealed class AliToolCoordinator : IDisposable
         IParticipantMemoryService? participantMemories = null,
         IParticipantRosterAuthority? participantRosterAuthority = null,
         ParticipantMemoryReceiptAuthority? participantReceiptAuthority = null,
-        Func<WebSourceBackendSettings>? internetSettings = null)
+        Func<WebSourceBackendSettings>? internetSettings = null,
+        SerenaCodingService? serenaCoding = null)
         : this(
             runtime,
             chatClient,
@@ -96,7 +98,8 @@ public sealed class AliToolCoordinator : IDisposable
             participantMemories,
             participantRosterAuthority,
             participantReceiptAuthority,
-            internetSettings)
+            internetSettings,
+            serenaCoding)
     {
     }
 
@@ -126,7 +129,8 @@ public sealed class AliToolCoordinator : IDisposable
         IParticipantMemoryService? participantMemories = null,
         IParticipantRosterAuthority? participantRosterAuthority = null,
         ParticipantMemoryReceiptAuthority? participantReceiptAuthority = null,
-        Func<WebSourceBackendSettings>? internetSettings = null)
+        Func<WebSourceBackendSettings>? internetSettings = null,
+        SerenaCodingService? serenaCoding = null)
     {
         _assistantName = assistantProfile.Normalize().AssistantName;
         _activeUsers = activeUsers;
@@ -194,7 +198,8 @@ public sealed class AliToolCoordinator : IDisposable
             executionAdapters: new AliExecutionEffectAdapterRegistry(
                 executionEffectAdapters),
             durableEffects: AliProductionDurableEffectAdapters.Create(),
-            toolOutcomes: _toolOutcomes);
+            toolOutcomes: _toolOutcomes,
+            serenaCoding: serenaCoding);
     }
 
     internal CapabilitySettingsSnapshotOwner? CapabilitySettings => _harness.CapabilitySettings;
