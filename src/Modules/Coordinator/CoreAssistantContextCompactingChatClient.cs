@@ -18,6 +18,15 @@ internal sealed class CoreAssistantContextCompactingChatClient(IChatClient inner
     private const int MaximumArgumentCharacters = 1_600;
     private const int MaximumArgumentValueCharacters = 480;
 
+    // Devstral sometimes emits a tool call as plain text instead of a native
+    // structured call: "[TOOL_CALLS]toolName[ARGS]{...json...}". A prior fix
+    // for this (AliToolCallingChatClient.PromoteRegisteredTextualToolCall) was
+    // written but never actually wired into the live fast-path client chain --
+    // this class is the one that's genuinely live, so the promotion has to
+    // happen here, against the real streamed text, not a buffered response.
+    private const string TextualToolCallPrefix = "[TOOL_CALLS]";
+    private const string TextualToolArgumentsMarker = "[ARGS]";
+
     private readonly IChatClient _inner = inner ?? throw new ArgumentNullException(nameof(inner));
     private static readonly AsyncLocal<IReadOnlySet<string>?> FocusedToolNames = new();
     private static readonly AsyncLocal<RequiredToolFocus?> RequiredFocusedTool = new();
@@ -38,14 +47,133 @@ internal sealed class CoreAssistantContextCompactingChatClient(IChatClient inner
         ChatOptions? options = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        var effectiveOptions = ApplyToolFocus(options);
+        var registeredTools = effectiveOptions?.Tools?
+            .OfType<AIFunctionDeclaration>()
+            .ToArray() ?? [];
+
+        // Buffer only while the accumulated text could still become (or
+        // already matches the start of) the textual tool-call marker; the
+        // moment it provably can't, flush everything buffered as normal text
+        // and stop intercepting for the rest of this response. This keeps the
+        // added latency to at most the first few characters for ordinary
+        // chat, not the whole response.
+        var buffer = new System.Text.StringBuilder();
+        var intercepting = registeredTools.Length > 0;
+
         await foreach (var update in _inner
                            .GetStreamingResponseAsync(
                                CompactForTurn(messages),
-                               ApplyToolFocus(options),
+                               effectiveOptions,
                                cancellationToken)
                            .ConfigureAwait(false))
         {
-            yield return update;
+            if (!intercepting)
+            {
+                yield return update;
+                continue;
+            }
+
+            if (update.Contents.Any(content => content is not TextContent))
+            {
+                // A real structured tool call (or other content) already
+                // arrived -- this response was never a textual marker.
+                intercepting = false;
+                if (buffer.Length > 0)
+                {
+                    yield return new ChatResponseUpdate(update.Role, buffer.ToString());
+                    buffer.Clear();
+                }
+                yield return update;
+                continue;
+            }
+
+            var deltaText = string.Concat(update.Contents.OfType<TextContent>().Select(c => c.Text));
+            if (deltaText.Length == 0)
+            {
+                continue;
+            }
+            buffer.Append(deltaText);
+            var accumulated = buffer.ToString();
+            if (TextualToolCallPrefix.StartsWith(accumulated, StringComparison.Ordinal)
+                || accumulated.StartsWith(TextualToolCallPrefix, StringComparison.Ordinal))
+            {
+                continue; // still could become (or already matches) the marker
+            }
+
+            intercepting = false;
+            yield return new ChatResponseUpdate(update.Role, accumulated);
+            buffer.Clear();
+        }
+
+        if (buffer.Length == 0)
+        {
+            yield break;
+        }
+
+        var raw = buffer.ToString();
+        var promotedCall = TryParseTextualToolCall(raw, registeredTools);
+        yield return promotedCall is not null
+            ? new ChatResponseUpdate(ChatRole.Assistant, [promotedCall])
+            : new ChatResponseUpdate(ChatRole.Assistant, raw);
+    }
+
+    private static FunctionCallContent? TryParseTextualToolCall(
+        string raw,
+        IReadOnlyList<AIFunctionDeclaration> registeredTools)
+    {
+        var trimmed = raw.Trim();
+        if (!trimmed.StartsWith(TextualToolCallPrefix, StringComparison.Ordinal)
+            || trimmed.IndexOf(TextualToolCallPrefix, TextualToolCallPrefix.Length, StringComparison.Ordinal) >= 0)
+        {
+            return null;
+        }
+
+        var argumentsMarkerIndex = trimmed.IndexOf(
+            TextualToolArgumentsMarker,
+            TextualToolCallPrefix.Length,
+            StringComparison.Ordinal);
+        if (argumentsMarkerIndex <= TextualToolCallPrefix.Length
+            || trimmed.IndexOf(
+                TextualToolArgumentsMarker,
+                argumentsMarkerIndex + TextualToolArgumentsMarker.Length,
+                StringComparison.Ordinal) >= 0)
+        {
+            return null;
+        }
+
+        var toolName = trimmed[TextualToolCallPrefix.Length..argumentsMarkerIndex].Trim();
+        if (toolName.Length == 0
+            || !registeredTools.Any(tool => string.Equals(tool.Name, toolName, StringComparison.Ordinal)))
+        {
+            return null;
+        }
+
+        var argumentsJson = trimmed[(argumentsMarkerIndex + TextualToolArgumentsMarker.Length)..].Trim();
+        if (argumentsJson.Length == 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(argumentsJson);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            var arguments = new Dictionary<string, object?>(StringComparer.Ordinal);
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                arguments[property.Name] = property.Value.Clone();
+            }
+
+            return new FunctionCallContent($"call_{Guid.NewGuid():N}", toolName, arguments);
+        }
+        catch (JsonException)
+        {
+            return null;
         }
     }
 
