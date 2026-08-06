@@ -52,6 +52,15 @@ public sealed class SerenaCodingService : IAsyncDisposable
 
     public event Action<SerenaRuntimeStatus>? StatusChanged;
 
+    /// <summary>
+    /// The one Workspace root Ali is configured to operate in. Serena maintains
+    /// its own machine-global project registry, independent of this value, so
+    /// this is exposed specifically so a caller can verify that whatever
+    /// project Serena reports as active actually falls inside it before
+    /// trusting further tool results.
+    /// </summary>
+    public string WorkspaceRoot => _workspaceRoot;
+
     public IReadOnlyList<AITool> Tools => Volatile.Read(ref _tools);
 
     public string? ServerInstructions => Volatile.Read(ref _serverInstructions);

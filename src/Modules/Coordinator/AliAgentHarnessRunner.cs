@@ -505,7 +505,20 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             // admitted permission receipt even on this path, so a narrow,
             // tool-name-scoped middleware records one for exactly those two
             // tools and is a no-op for everything else on this path.
-            return AliCoreMemoryReadReceiptMiddleware.WithMemoryReadReceipts(agent, _turnAccessor);
+            agent = AliCoreMemoryReadReceiptMiddleware.WithMemoryReadReceipts(agent, _turnAccessor);
+            // Serena maintains its own machine-global project registry,
+            // independent of Ali's configured Workspace root -- confirmed live
+            // to allow activating a same-named project entirely outside the
+            // sandbox. This checks every activate_project result against the
+            // configured root and rejects anything outside it. A no-op when
+            // Serena isn't configured or that tool isn't offered this turn.
+            if (_serenaCoding is not null)
+            {
+                agent = AliSerenaWorkspaceGuardMiddleware.WithWorkspaceGuard(
+                    agent,
+                    _serenaCoding.WorkspaceRoot);
+            }
+            return agent;
         }
 
         agent = AliFrameworkProviderOutcomeMiddleware.WithOutcomeReporting(
