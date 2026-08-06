@@ -36,8 +36,46 @@ public sealed partial class SafeActivatingLocalRuntime
         ChatOptions? options = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var response = await GetResponseAsync(messages, options, cancellationToken).ConfigureAwait(false);
-        foreach (var update in response.ToChatResponseUpdates())
+        await _dispatchTransitionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        IChatClient? chatClient;
+        ILocalModelRuntime? legacyRuntime;
+        try
+        {
+            Volatile.Write(ref _activeRuntimeUnloadedForCandidate, false);
+            var runtime = Volatile.Read(ref _activeRuntime);
+            if (runtime is IChatClient asChatClient)
+            {
+                chatClient = asChatClient;
+                legacyRuntime = null;
+            }
+            else
+            {
+                chatClient = null;
+                legacyRuntime = runtime;
+            }
+        }
+        finally
+        {
+            _dispatchTransitionGate.Release();
+        }
+
+        if (chatClient is not null)
+        {
+            await foreach (var update in chatClient
+                               .GetStreamingResponseAsync(messages, options, cancellationToken)
+                               .ConfigureAwait(false))
+            {
+                yield return update;
+            }
+
+            yield break;
+        }
+
+        await foreach (var update in GetLegacyStreamingResponseAsync(
+                           legacyRuntime!,
+                           messages,
+                           cancellationToken)
+                           .ConfigureAwait(false))
         {
             yield return update;
         }
@@ -115,6 +153,41 @@ public sealed partial class SafeActivatingLocalRuntime
         }
 
         return new ChatResponse(new MeaiChatMessage(MeaiChatRole.Assistant, answer.ToString()));
+    }
+
+    private static async IAsyncEnumerable<ChatResponseUpdate> GetLegacyStreamingResponseAsync(
+        ILocalModelRuntime runtime,
+        IEnumerable<MeaiChatMessage> messages,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var messageList = messages.ToList();
+        var user = messageList.LastOrDefault(message => message.Role == MeaiChatRole.User);
+        var history = messageList
+            .Where(message => !ReferenceEquals(message, user))
+            .Select(message => new ChatMessage(
+                $"msg_meai_{Guid.NewGuid():N}",
+                message.Role == MeaiChatRole.System
+                    ? ChatRole.System
+                    : message.Role == MeaiChatRole.Assistant
+                        ? ChatRole.Assistant
+                        : ChatRole.User,
+                message.Text ?? string.Empty,
+                DateTimeOffset.UtcNow,
+                EvidenceStatus.Unverified))
+            .ToList();
+        var request = new ChatRequest(
+            "extensions_ai_fallback",
+            $"msg_user_{Guid.NewGuid():N}",
+            user?.Text ?? string.Empty,
+            history);
+
+        await foreach (var token in runtime.StreamChatAsync(request, cancellationToken).ConfigureAwait(false))
+        {
+            if (!token.IsThinking && !string.IsNullOrEmpty(token.Text))
+            {
+                yield return new ChatResponseUpdate(MeaiChatRole.Assistant, token.Text);
+            }
+        }
     }
 
     /// <summary>

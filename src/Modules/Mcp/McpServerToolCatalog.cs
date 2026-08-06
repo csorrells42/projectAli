@@ -26,8 +26,7 @@ public static class McpServerToolCatalog
         Policy(AliCapabilityCatalog.GetAssistantIdentityName, "Return Ali's configured assistant identity.", readsPrivateData: true),
         Policy(AliCapabilityCatalog.GetCurrentLocalTimeName, "Return the computer's current local time and time zone."),
         Policy(AliCapabilityCatalog.FileReadName, "Read an exact text file from an approved workstation root.", readsPrivateData: true),
-        Policy(AliCapabilityCatalog.FileWriteName, "Create or explicitly overwrite an exact text file under an approved workstation root.", writesLocalData: true, readsPrivateData: true),
-        Policy(AliCapabilityCatalog.FileReplaceName, "Replace exact text in an existing file under an approved workstation root.", writesLocalData: true, readsPrivateData: true),
+        Policy(AliCapabilityCatalog.FileWriteName, "Create a new exact text file under an approved workstation root without overwriting existing content.", writesLocalData: true, readsPrivateData: true),
         Policy(AliCapabilityCatalog.CodingListCapabilitiesName, "List live coding providers and shared infrastructure.", readsPrivateData: true),
         Policy(AliCapabilityCatalog.CodingInspectProjectName, "Detect an approved project's language and provider.", readsPrivateData: true),
         Policy(AliCapabilityCatalog.CodingIndexProjectName, "Build a bounded local source index.", readsPrivateData: true),
@@ -326,13 +325,9 @@ internal sealed class AliMcpServerToolFactory
                 AliCapabilityCatalog.FileReadName,
                 "Read one UTF-8 text file. fileName may be an approved absolute path or a virtual path beginning with Workspace, Desktop, Documents, Downloads, or Exports.");
             functions[AliCapabilityCatalog.FileWriteName] = AIFunctionFactory.Create(
-                (Func<string, string, bool, CancellationToken, Task<McpSourceFileResult>>)_sourceFileTools.WriteAsync,
+                (Func<string, string, CancellationToken, Task<McpSourceFileResult>>)_sourceFileTools.WriteCoreAsync,
                 AliCapabilityCatalog.FileWriteName,
-                "Create or overwrite one UTF-8 text file without shell quoting. Use overwrite=false for a new file. Use overwrite=true only when replacing the entire existing file is intended and approved.");
-            functions[AliCapabilityCatalog.FileReplaceName] = AIFunctionFactory.Create(
-                (Func<string, string, string, bool, CancellationToken, Task<McpSourceFileResult>>)_sourceFileTools.ReplaceAsync,
-                AliCapabilityCatalog.FileReplaceName,
-                "Replace exact ordinal text in one existing file without shell quoting. Set replaceAll=false for the first exact occurrence or true for every exact occurrence.");
+                "Create one new UTF-8 text file without shell quoting. Existing files are never overwritten; use file_access_replace_lines or file_access_append to modify them.");
         }
 
         return new McpServerFunctionCatalog(

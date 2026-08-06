@@ -145,12 +145,14 @@ internal sealed class AliToolCallingChatClient(
         }
 
         var turn = CurrentTurn();
-        var planningScope = await CreatePlanningScopeAsync(
-            registeredTools,
-            materializedMessages,
-            turn,
-            additionalNeed: null,
-            cancellationToken).ConfigureAwait(false);
+        var planningScope = AliCoreAssistantExecutionContext.IsActive
+            ? CreateMinimumMessageScope(registeredTools, materializedMessages, turn)
+            : await CreatePlanningScopeAsync(
+                registeredTools,
+                materializedMessages,
+                turn,
+                additionalNeed: null,
+                cancellationToken).ConfigureAwait(false);
         var tools = planningScope.SelectedTools;
         if (runtime.ActiveProfile.SupportsToolCalls)
         {
@@ -169,6 +171,14 @@ internal sealed class AliToolCallingChatClient(
                     && turn?.UsedEvidenceTool != true
                     && observedToolResultCount == 0))
             {
+                return nativeResponse;
+            }
+
+            if (AliCoreAssistantExecutionContext.IsActive)
+            {
+                // AliMinimumMessage receives the model's answer directly. Exact
+                // tool results remain in the same in-memory session; no second
+                // critic request is inserted into the core route.
                 return nativeResponse;
             }
 
@@ -239,13 +249,16 @@ internal sealed class AliToolCallingChatClient(
             compatibilityOptions,
             turn,
             cancellationToken).ConfigureAwait(false);
-        response = await AuditFinalDecisionAsync(
-            response,
-            observedToolResultCount,
-            planningScope,
-            compatibilityOptions,
-            turn,
-            cancellationToken).ConfigureAwait(false);
+        if (!AliCoreAssistantExecutionContext.IsActive)
+        {
+            response = await AuditFinalDecisionAsync(
+                response,
+                observedToolResultCount,
+                planningScope,
+                compatibilityOptions,
+                turn,
+                cancellationToken).ConfigureAwait(false);
+        }
         response = await RepairInvalidToolDecisionAsync(
             response,
             planningScope.DecisionMessages,
@@ -847,35 +860,30 @@ internal sealed class AliToolCallingChatClient(
                 + "Do not repeat it. If the result proves completion, return the final answer. If work remains, choose a different advancing action. "
                 + "Repeating an operation on a different target or rebuilding after a source edit is valid progress and must not be blocked."))
             .ToArray();
-        while (true)
+        var repaired = await GetStructuredDecisionResponseAsync(
+            repairMessages,
+            compatibilityOptions,
+            turn,
+            cancellationToken).ConfigureAwait(false);
+        repaired = await CompleteTruncatedDecisionAsync(
+            repaired,
+            repairMessages,
+            compatibilityOptions,
+            turn,
+            cancellationToken).ConfigureAwait(false);
+        if (!TryGetDecisionCallFingerprint(repaired.Text, out var repairedFingerprint)
+            || !string.Equals(repairedFingerprint, fingerprint, StringComparison.Ordinal))
         {
-            var repaired = await GetStructuredDecisionResponseAsync(
-                repairMessages,
-                compatibilityOptions,
-                turn,
-                cancellationToken).ConfigureAwait(false);
-            repaired = await CompleteTruncatedDecisionAsync(
-                repaired,
-                repairMessages,
-                compatibilityOptions,
-                turn,
-                cancellationToken).ConfigureAwait(false);
-            if (!TryGetDecisionCallFingerprint(repaired.Text, out var repairedFingerprint)
-                || !string.Equals(repairedFingerprint, fingerprint, StringComparison.Ordinal))
-            {
-                return repaired;
-            }
-
-            turn.Report(
-                AgentActivityKind.Warning,
-                $"{_assistantName}'s proposed step would not advance the request",
-                $"{_assistantName} is returning to the planner for a different concrete action.");
-            repairMessages = repairMessages
-                .Append(new AIChatMessage(
-                    AIChatRole.System,
-                    "The proposed action is still the exact completed tool call with no new evidence or state change. It cannot advance the request. Choose a different atomic action, return a verified completed result, or provide authoritative evidence that the requested outcome is impossible. Retry count is not blocker evidence."))
-                .ToArray();
+            return repaired;
         }
+
+        turn.Report(
+            AgentActivityKind.Error,
+            "Stopped an unchanged tool loop",
+            "The model repeated the exact completed action after one correction. The duplicate was not dispatched again.");
+        return CreateFinalDecisionResponse(
+            repaired,
+            "I could not continue because the exact same completed tool action was selected again after one correction. I stopped without executing the duplicate. The request remains incomplete.");
     }
 
     private bool TryGetDecisionCallFingerprint(string? text, out string fingerprint)
@@ -949,6 +957,26 @@ internal sealed class AliToolCallingChatClient(
                 turn?.OriginalUserText,
                 selection.Directory),
             selection.Directory);
+    }
+
+    private static ToolPlanningScope CreateMinimumMessageScope(
+        IReadOnlyList<AIFunctionDeclaration> registeredTools,
+        IReadOnlyList<AIChatMessage> sourceMessages,
+        CoordinatorTurnContext? turn)
+    {
+        // AliMinimumMessage already receives the small, startup-loaded tool set.
+        // Do not query embeddings, memory, disk, MCP, or another selector between
+        // the model and those tools.
+        return new ToolPlanningScope(
+            registeredTools,
+            registeredTools,
+            sourceMessages,
+            BuildCompatibilityMessages(
+                sourceMessages,
+                registeredTools,
+                turn?.OriginalUserText,
+                toolDirectory: string.Empty),
+            directory: string.Empty);
     }
 
     private IReadOnlyCollection<string> GetRetainedToolNames(CoordinatorTurnContext? turn)

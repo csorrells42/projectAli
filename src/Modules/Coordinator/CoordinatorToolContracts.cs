@@ -354,6 +354,41 @@ internal sealed class CoordinatorTurnContext(
         return true;
     }
 
+    // The fast core-assistant path never registers a CoordinatorToolPlan or an
+    // action-execution authority (that machinery is intentionally skipped for
+    // speed). A narrow set of read-only tools still needs TryGetActiveToolCallId
+    // to resolve so they can look up an auto-approved permission receipt. This
+    // entry point makes only that possible, with no plan lookup and no execution
+    // authority requirement, so it cannot be mistaken for a durable action grant.
+    internal bool TryEnterLightweightToolInvocation(
+        string callId,
+        string toolName,
+        out IDisposable? scope)
+    {
+        scope = null;
+        if (!IsBoundedShadowCallId(callId)
+            || !IsBoundedShadowToolName(toolName))
+        {
+            return false;
+        }
+
+        var plan = new CoordinatorToolPlan(
+            callId,
+            toolName,
+            Assessment: string.Empty,
+            ActionPlan: string.Empty,
+            NextStep: string.Empty,
+            SelectionHeadline: string.Empty,
+            ResultHeadline: string.Empty,
+            TechnicalArguments: string.Empty);
+        var frame = new ActiveToolInvocationFrame(
+            plan,
+            _activeToolInvocation.Value);
+        _activeToolInvocation.Value = frame;
+        scope = new ActiveToolInvocationLease(this, frame);
+        return true;
+    }
+
     internal bool TryGetActiveToolCallId(string toolName, out string? callId)
     {
         var frame = _activeToolInvocation.Value;
@@ -862,6 +897,24 @@ internal sealed class CoordinatorTurnContext(
             ActivityKey: activityKey,
             ExecutionReceipt: executionReceipt,
             RecoveryPrompt: recoveryPrompt));
+
+    internal bool HasPublishedResponseText { get; private set; }
+
+    internal void PublishResponseText(string responseText)
+    {
+        if (string.IsNullOrEmpty(responseText))
+        {
+            return;
+        }
+
+        HasPublishedResponseText = true;
+        publish(new AssistantStreamChunk(
+            ConversationId,
+            UserMessageId,
+            AssistantMessageId,
+            responseText,
+            Ali.Modules.Evidence.EvidenceStatus.Unknown));
+    }
 
     internal void PublishInterimResponse(
         string responseText,

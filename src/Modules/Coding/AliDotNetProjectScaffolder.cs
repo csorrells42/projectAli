@@ -45,6 +45,7 @@ internal sealed class AliDotNetProjectScaffolder
         string template,
         CancellationToken cancellationToken)
     {
+        projectPath = NormalizeNativeProjectPath(projectPath);
         var normalizedTemplate = NormalizeTemplate(template);
         var project = ResolveNewProject(projectPath);
         var started = Stopwatch.StartNew();
@@ -114,6 +115,23 @@ internal sealed class AliDotNetProjectScaffolder
                 : "Project creation failed. Review the SDK output before continuing.",
             CompactOutput(execution.Output),
             started.ElapsedMilliseconds);
+    }
+
+    private static string NormalizeNativeProjectPath(string projectPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectPath);
+        var normalized = projectPath.Trim().Trim('"', '\'', '`');
+        if (Path.IsPathFullyQualified(normalized)
+            || normalized.Contains('/')
+            || normalized.Contains('\\'))
+        {
+            return normalized.Replace('\\', '/');
+        }
+
+        var projectName = normalized.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
+            ? Path.GetFileNameWithoutExtension(normalized)
+            : normalized;
+        return $"Workspace/{projectName}/{projectName}.csproj";
     }
 
     private NewProject ResolveNewProject(string projectPath)

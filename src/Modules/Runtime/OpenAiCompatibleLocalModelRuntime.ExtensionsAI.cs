@@ -61,11 +61,348 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
         ChatOptions? options = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var response = await GetResponseAsync(messages, options, cancellationToken).ConfigureAwait(false);
-        foreach (var update in response.ToChatResponseUpdates())
+        ArgumentNullException.ThrowIfNull(messages);
+        if (!_options.StreamingEnabled)
         {
-            yield return update;
+            // The user's selected runtime/profile does not claim streaming support.
+            // Fall back to the exact non-streaming behavior rather than guess.
+            var fallback = await GetResponseAsync(messages, options, cancellationToken).ConfigureAwait(false);
+            foreach (var update in fallback.ToChatResponseUpdates())
+            {
+                yield return update;
+            }
+            yield break;
         }
+
+        if (Interlocked.CompareExchange(ref _requestInFlight, 1, 0) != 0)
+        {
+            throw new InvalidOperationException(
+                "The local model runtime already has one request in flight. Ali does not queue or overlap model generations.");
+        }
+
+        var toolCalls = new SortedDictionary<int, StreamedToolCallAccumulator>();
+        string? finishReason = null;
+        try
+        {
+            EnsureEndpointAllowed();
+            await EnsureLemonadeModelLoadedAsync(cancellationToken).ConfigureAwait(false);
+            var messageList = messages.ToList();
+            var requestOptions = options?.Clone() ?? new ChatOptions();
+            requestOptions.MaxOutputTokens = ResolveExtensionsAiMaxTokens(requestOptions.MaxOutputTokens);
+            var useNativeOllama = IsNativeOllamaEndpoint();
+            var uri = useNativeOllama ? BuildOllamaApiUri("chat") : BuildUri("chat/completions");
+            cancellationToken.ThrowIfCancellationRequested();
+            var payload = SerializeExtensionsAiPayload(messageList, requestOptions, useNativeOllama, stream: true);
+            using var request = new HttpRequestMessage(HttpMethod.Post, uri);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(
+                useNativeOllama ? "application/x-ndjson" : "text/event-stream"));
+            request.Content = new StringContent(payload, Encoding.UTF8, "application/json");
+
+            using var response = await SendRuntimeAsync(
+                    request,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                var error = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                throw new HttpRequestException(
+                    FormatChatHttpError(response.StatusCode, error)
+                    + " Serialized message roles: "
+                    + DescribeExtensionsAiMessageRoles(payload));
+            }
+
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            using var reader = new StreamReader(stream, Encoding.UTF8);
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+                if (line is null)
+                {
+                    break;
+                }
+
+                var delta = useNativeOllama
+                    ? ExtractNativeOllamaStreamDelta(line)
+                    : line.StartsWith("data:", StringComparison.OrdinalIgnoreCase)
+                        ? ExtractExtensionsAiStreamDelta(line["data:".Length..])
+                        : null;
+                if (delta is null)
+                {
+                    continue;
+                }
+
+                if (delta.IsDone)
+                {
+                    break;
+                }
+
+                if (!string.IsNullOrWhiteSpace(delta.FinishReason))
+                {
+                    finishReason = delta.FinishReason;
+                }
+
+                if (delta.ToolCallFragments is { Count: > 0 })
+                {
+                    foreach (var fragment in delta.ToolCallFragments)
+                    {
+                        if (!toolCalls.TryGetValue(fragment.Index, out var accumulator))
+                        {
+                            accumulator = new StreamedToolCallAccumulator();
+                            toolCalls[fragment.Index] = accumulator;
+                        }
+
+                        if (!string.IsNullOrEmpty(fragment.Id))
+                        {
+                            accumulator.Id = fragment.Id;
+                        }
+
+                        if (!string.IsNullOrEmpty(fragment.Name))
+                        {
+                            accumulator.Name = fragment.Name;
+                        }
+
+                        if (fragment.ArgumentsDelta is not null)
+                        {
+                            accumulator.Arguments.Append(fragment.ArgumentsDelta);
+                        }
+                    }
+
+                    continue;
+                }
+
+                if (!string.IsNullOrEmpty(delta.Content))
+                {
+                    yield return new ChatResponseUpdate(MeaiChatRole.Assistant, delta.Content);
+                }
+            }
+        }
+        finally
+        {
+            Volatile.Write(ref _requestInFlight, 0);
+        }
+
+        // Tool calls can only be resolved once every fragment has arrived, so
+        // they are yielded here, after the read loop, exactly once each and
+        // only ever complete (never partial arguments) — this matches what the
+        // non-streaming path already guarantees callers today.
+        if (toolCalls.Count > 0)
+        {
+            var calls = toolCalls
+                .Select(pair => BuildStreamedFunctionCall(pair.Key, pair.Value))
+                .Where(call => call is not null)
+                .Select(call => call!)
+                .ToArray();
+            if (calls.Length > 0)
+            {
+                yield return new ChatResponseUpdate(MeaiChatRole.Assistant, calls.Cast<AIContent>().ToList())
+                {
+                    FinishReason = string.IsNullOrWhiteSpace(finishReason) ? null : new ChatFinishReason(finishReason)
+                };
+                yield break;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(finishReason))
+        {
+            yield return new ChatResponseUpdate
+            {
+                Role = MeaiChatRole.Assistant,
+                FinishReason = new ChatFinishReason(finishReason)
+            };
+        }
+    }
+
+    // One real accumulator per streamed tool-call index. OpenAI-compatible
+    // servers fragment a single tool call's id/name/arguments across several
+    // SSE chunks that share one "index"; arguments must be concatenated in
+    // arrival order and only parsed as JSON once the stream is fully done.
+    private sealed class StreamedToolCallAccumulator
+    {
+        public string? Id { get; set; }
+
+        public string? Name { get; set; }
+
+        public StringBuilder Arguments { get; } = new();
+    }
+
+    private sealed record StreamedToolCallFragment(
+        int Index,
+        string? Id,
+        string? Name,
+        string? ArgumentsDelta);
+
+    private sealed record ExtensionsAiStreamDelta(
+        string? Content,
+        string? FinishReason,
+        bool IsDone,
+        IReadOnlyList<StreamedToolCallFragment>? ToolCallFragments = null);
+
+    private static ExtensionsAiStreamDelta? ExtractExtensionsAiStreamDelta(string dataLine)
+    {
+        var payload = dataLine.Trim();
+        if (payload.Length == 0)
+        {
+            return null;
+        }
+
+        if (payload == "[DONE]")
+        {
+            return new ExtensionsAiStreamDelta(null, null, IsDone: true);
+        }
+
+        using var document = JsonDocument.Parse(payload);
+        var root = document.RootElement;
+        if (!root.TryGetProperty("choices", out var choices) || choices.GetArrayLength() == 0)
+        {
+            return null;
+        }
+
+        var choice = choices[0];
+        var finishReason = choice.TryGetProperty("finish_reason", out var finishReasonElement)
+            && finishReasonElement.ValueKind == JsonValueKind.String
+                ? finishReasonElement.GetString()
+                : null;
+        if (!choice.TryGetProperty("delta", out var delta))
+        {
+            return new ExtensionsAiStreamDelta(null, finishReason, IsDone: false);
+        }
+
+        var content = delta.TryGetProperty("content", out var deltaContent)
+            && deltaContent.ValueKind == JsonValueKind.String
+                ? deltaContent.GetString()
+                : null;
+
+        List<StreamedToolCallFragment>? fragments = null;
+        if (delta.TryGetProperty("tool_calls", out var toolCalls)
+            && toolCalls.ValueKind == JsonValueKind.Array)
+        {
+            fragments = new List<StreamedToolCallFragment>();
+            foreach (var entry in toolCalls.EnumerateArray())
+            {
+                var index = entry.TryGetProperty("index", out var indexElement)
+                    && indexElement.ValueKind == JsonValueKind.Number
+                    && indexElement.TryGetInt32(out var parsedIndex)
+                        ? parsedIndex
+                        : 0;
+                var id = entry.TryGetProperty("id", out var idElement)
+                    && idElement.ValueKind == JsonValueKind.String
+                        ? idElement.GetString()
+                        : null;
+                string? name = null;
+                string? argumentsDelta = null;
+                if (entry.TryGetProperty("function", out var function))
+                {
+                    name = function.TryGetProperty("name", out var nameElement)
+                        && nameElement.ValueKind == JsonValueKind.String
+                            ? nameElement.GetString()
+                            : null;
+                    argumentsDelta = function.TryGetProperty("arguments", out var argumentsElement)
+                        && argumentsElement.ValueKind == JsonValueKind.String
+                            ? argumentsElement.GetString()
+                            : null;
+                }
+
+                fragments.Add(new StreamedToolCallFragment(index, id, name, argumentsDelta));
+            }
+        }
+
+        return new ExtensionsAiStreamDelta(content, finishReason, IsDone: false, fragments);
+    }
+
+    private static ExtensionsAiStreamDelta? ExtractNativeOllamaStreamDelta(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        var content = root.TryGetProperty("message", out var message)
+            && message.TryGetProperty("content", out var contentElement)
+            && contentElement.ValueKind == JsonValueKind.String
+                ? contentElement.GetString()
+                : null;
+        var done = root.TryGetProperty("done", out var doneElement)
+            && doneElement.ValueKind == JsonValueKind.True;
+        var finishReason = root.TryGetProperty("done_reason", out var reasonElement)
+            && reasonElement.ValueKind == JsonValueKind.String
+                ? reasonElement.GetString()
+                : done ? "stop" : null;
+
+        // Unlike OpenAI-compatible streaming, Ollama's native chat API sends a
+        // complete tool_calls array in one message rather than fragmenting
+        // arguments across chunks, so each entry here is already whole.
+        List<StreamedToolCallFragment>? fragments = null;
+        if (message.ValueKind == JsonValueKind.Object
+            && message.TryGetProperty("tool_calls", out var toolCalls)
+            && toolCalls.ValueKind == JsonValueKind.Array
+            && toolCalls.GetArrayLength() > 0)
+        {
+            fragments = new List<StreamedToolCallFragment>();
+            var index = 0;
+            foreach (var entry in toolCalls.EnumerateArray())
+            {
+                var function = entry.TryGetProperty("function", out var functionElement)
+                    ? functionElement
+                    : entry;
+                var name = function.TryGetProperty("name", out var nameElement)
+                    && nameElement.ValueKind == JsonValueKind.String
+                        ? nameElement.GetString()
+                        : null;
+                var arguments = function.TryGetProperty("arguments", out var argumentsElement)
+                    ? argumentsElement.ValueKind == JsonValueKind.String
+                        ? argumentsElement.GetString()
+                        : argumentsElement.GetRawText()
+                    : null;
+                fragments.Add(new StreamedToolCallFragment(
+                    index++,
+                    $"call_{Guid.NewGuid():N}",
+                    name,
+                    arguments));
+            }
+        }
+
+        var isDone = done && string.IsNullOrEmpty(content) && fragments is null;
+        return new ExtensionsAiStreamDelta(content, finishReason, isDone, fragments);
+    }
+
+    private static FunctionCallContent? BuildStreamedFunctionCall(
+        int index,
+        StreamedToolCallAccumulator accumulator)
+    {
+        if (string.IsNullOrWhiteSpace(accumulator.Name))
+        {
+            return null;
+        }
+
+        var callId = string.IsNullOrWhiteSpace(accumulator.Id)
+            ? $"call_{index}_{Guid.NewGuid():N}"
+            : accumulator.Id;
+        var argumentsText = accumulator.Arguments.ToString();
+        if (string.IsNullOrWhiteSpace(argumentsText))
+        {
+            return new FunctionCallContent(callId, accumulator.Name, new Dictionary<string, object?>());
+        }
+
+        Dictionary<string, object?> arguments;
+        try
+        {
+            arguments = ParseFunctionArguments(JsonDocument.Parse(argumentsText).RootElement);
+        }
+        catch (JsonException)
+        {
+            // The stream ended (almost always the output-token limit) before this
+            // call's arguments finished, leaving unparseable JSON. Dropping the call
+            // rather than throwing lets the existing empty-response retry in
+            // AliMinimumMessage ask the model to try again instead of crashing the
+            // whole turn on what is usually a too-large single tool-call payload.
+            return null;
+        }
+
+        return new FunctionCallContent(callId, accumulator.Name, arguments);
     }
 
     public object? GetService(Type serviceType, object? serviceKey = null)
@@ -97,7 +434,8 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
     private string SerializeExtensionsAiPayload(
         IReadOnlyList<MeaiChatMessage> messages,
         ChatOptions? options,
-        bool useNativeOllama)
+        bool useNativeOllama,
+        bool stream = false)
     {
         var suppressPersona = options?.AdditionalProperties is { } properties
             && properties.TryGetValue(
@@ -127,7 +465,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
                 model = _options.Model,
                 messages = serializedMessages,
                 tools = tools.Length == 0 ? null : tools,
-                stream = false,
+                stream,
                 think = ResolveNativeThinkingValue(boundReasoningEffort),
                 keep_alive = OllamaRuntimeSafetyPolicy.KeepAlive,
                 options = new
@@ -151,7 +489,7 @@ public sealed partial class OpenAiCompatibleLocalModelRuntime
                     ? (bool?)null
                     : options?.AllowMultipleToolCalls ?? false,
                 response_format = ResolveResponseFormat(options?.ResponseFormat),
-                stream = false,
+                stream,
                 max_tokens = maxTokens,
                 temperature = _options.Temperature,
                 top_p = _options.TopP,

@@ -433,7 +433,7 @@ public sealed class AliToolCoordinator : IDisposable
                     publication.ConversationId,
                     publication.UserMessageId,
                     publication.AssistantMessageId,
-                    publication.AnswerText,
+                    turn.HasPublishedResponseText ? string.Empty : publication.AnswerText,
                     publication.EvidenceStatus,
                     publication.FinishReason)
                 {

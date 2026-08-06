@@ -28,6 +28,7 @@ internal sealed class CoreAssistantCompletionGate
     private bool _runRequired;
     private bool _workspaceToolObserved;
     private bool _runAttempted;
+    private bool _runInvalidated;
     private string? _sourceProjectKey;
     private DotNetCreateProjectResult? _latestCreate;
     private DotNetBuildResult? _latestBuild;
@@ -180,6 +181,10 @@ internal sealed class CoreAssistantCompletionGate
                             ReadWorkspaceProjectKey(run.ProjectPath) ?? pending.ProjectKey)
                             ? _sourceRevision
                             : -1;
+                    if (run.Success)
+                    {
+                        _runInvalidated = false;
+                    }
                 }
                 break;
 
@@ -192,6 +197,7 @@ internal sealed class CoreAssistantCompletionGate
                     if (stop.Success && _runAttempted)
                     {
                         _passingRunRevision = -1;
+                        _runInvalidated = true;
                     }
                 }
                 break;
@@ -298,8 +304,12 @@ internal sealed class CoreAssistantCompletionGate
             return true;
         }
 
-        if (_workspaceMutationRequired
-            && !string.IsNullOrWhiteSpace(_latestMutationFailure))
+        // Unconditional: a failed write/replace/delete must never be reported as
+        // done regardless of whether an upfront semantic classifier ran (the fast
+        // path never runs one — see AliMinimumMessage). Every other terminal tool
+        // failure (create/build/test/run/stop) is already checked unconditionally
+        // below; a failed mutation deserves the same guarantee, not a weaker one.
+        if (!string.IsNullOrWhiteSpace(_latestMutationFailure))
         {
             blocker = Failed(
                 "workspace-mutation-failed",
@@ -366,11 +376,20 @@ internal sealed class CoreAssistantCompletionGate
             return true;
         }
 
+        if (_runInvalidated)
+        {
+            blocker = Missing(
+                "run-stopped",
+                "The Workspace application was stopped and is not currently running. If the request depends on it running, call dotnet_run_project again; otherwise state truthfully that it is stopped before answering.",
+                "The Workspace application is currently stopped, not running.");
+            return true;
+        }
+
         if (_sourceRevision > 0 && _passingRunRevision != _sourceRevision)
         {
             blocker = Missing(
                 "run-missing-or-stale",
-                "The final Workspace source is not covered by a successful launch, or the application was stopped during repair. Call dotnet_run_project on the final successful build and use its exact result before answering.",
+                "The final Workspace source is not covered by a successful launch. Call dotnet_run_project on the final successful build and use its exact result before answering.",
                 "I did not verify that the final Workspace application launched after the last repair.");
             return true;
         }

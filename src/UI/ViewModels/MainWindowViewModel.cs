@@ -43,8 +43,6 @@ public sealed class MainWindowViewModel : ObservableObject
     private const string RuntimeTopPModelDefault = "Model default";
     internal const int MaximumRuntimeModelInventoryResponseBytes = LocalRuntimeModelInventory.MaximumResponseBytes;
     internal const int MaximumRetainedTurnExecutionReceipts = 16;
-    private const int StreamingTextFlushCharacters = 32;
-    private const int StreamingTextDisplaySliceCharacters = 72;
     private const string PermissionAllowed = "allowed";
     private const string PermissionAskFirst = "ask-first";
     private const string PermissionConfirmEachTime = "confirm-each-time";
@@ -53,8 +51,6 @@ public sealed class MainWindowViewModel : ObservableObject
     private const string PermissionDisabled = "disabled";
     private static readonly TimeSpan ModelStatusPingTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan OllamaStartRetryInterval = TimeSpan.FromMinutes(2);
-    private static readonly TimeSpan StreamingTextFlushInterval = TimeSpan.FromMilliseconds(45);
-    private static readonly TimeSpan StreamingTextPaceDelay = TimeSpan.FromMilliseconds(12);
     private static readonly TimeSpan VoicePlaybackEchoCooldown = TimeSpan.FromMilliseconds(1500);
     private static readonly JsonSerializerOptions MaintenanceReceiptJsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly string[] RuntimeTemperatureChoiceValues = ["0", "0.1", "0.2", "0.3", "0.5", "0.7", "1", "1.5", "2"];
@@ -2465,7 +2461,7 @@ public sealed class MainWindowViewModel : ObservableObject
             return;
         }
 
-        var text = ComposerText.Trim();
+        var text = ComposerText;
         if (string.IsNullOrWhiteSpace(text))
         {
             return;
@@ -2477,33 +2473,11 @@ public sealed class MainWindowViewModel : ObservableObject
 
     private async Task ResolveRecoveryDecisionAsync(bool primaryChoice)
     {
-        var context = _activeRecoveryPrompt;
-        if (context is null || IsBusy)
-        {
-            return;
-        }
-
-        var choice = (context.Prompt.Kind, primaryChoice) switch
-        {
-            (AgentRecoveryPromptKind.ActionReconciliation, true) =>
-                AgentRecoveryDecisionChoice.ConfirmApplied,
-            (AgentRecoveryPromptKind.ActionReconciliation, false) =>
-                AgentRecoveryDecisionChoice.ConfirmAbsent,
-            (AgentRecoveryPromptKind.FinalPublicationReconciliation, true) =>
-                AgentRecoveryDecisionChoice.ConfirmDisplayed,
-            (AgentRecoveryPromptKind.FinalPublicationReconciliation, false) =>
-                AgentRecoveryDecisionChoice.ConfirmNotDisplayed,
-            _ => throw new InvalidDataException("The active recovery prompt kind is invalid.")
-        };
-        var decision = new AgentRecoveryDecision(context.Prompt, choice);
-        decision.Validate();
-        await SendTextAsync(
-                string.Empty,
-                VoiceInputOrigin.Typed,
-                voiceMetadata: null,
-                recoveryContext: context,
-                recoveryDecision: decision)
-            .ConfigureAwait(true);
+        // DISABLED FOR AliMinimumMessage: recovery decisions are not part of the
+        // active message path. The parameter remains only because the old XAML
+        // command still binds to this method during incremental cleanup.
+        await Task.CompletedTask;
+        StatusText = "Durable recovery is disabled on the minimum message path.";
     }
 
     private async Task CancelActiveRecoveryDecisionAsync()
@@ -2608,108 +2582,51 @@ public sealed class MainWindowViewModel : ObservableObject
         string text,
         VoiceInputOrigin inputOrigin,
         VoiceTurnMetadata? voiceMetadata,
-        CancellationToken externalCancellationToken = default,
-        ActiveRecoveryPromptContext? recoveryContext = null,
-        AgentRecoveryDecision? recoveryDecision = null)
+        CancellationToken externalCancellationToken = default)
     {
-        var isRecoveryDecision = recoveryContext is not null || recoveryDecision is not null;
-        if (IsBusy
-            || (!isRecoveryDecision && string.IsNullOrWhiteSpace(text))
-            || (!isRecoveryDecision && IsRecoveryDecisionRequired))
+        if (IsBusy || string.IsNullOrWhiteSpace(text))
         {
-            if (!isRecoveryDecision && IsRecoveryDecisionRequired)
-            {
-                StatusText = "Use the recovery choices above or cancel the recovered turn.";
-            }
             return;
         }
 
-        if (isRecoveryDecision)
-        {
-            if (recoveryContext is null
-                || recoveryDecision is null
-                || !ReferenceEquals(recoveryContext, _activeRecoveryPrompt)
-                || !Equals(recoveryContext.Prompt, recoveryDecision.Prompt))
-            {
-                throw new InvalidOperationException(
-                    "The recovery decision no longer matches the active recovery prompt.");
-            }
-
-            recoveryDecision.Validate();
-        }
-
         IsBusy = true;
-        StatusText = isRecoveryDecision
-            ? "Applying the recovery decision..."
-            : "Streaming local response...";
-        var previousTurnExecutionReceipts = _currentTurnExecutionReceipts
-            .TakeLast(MaximumRetainedTurnExecutionReceipts)
-            .ToArray();
+        StatusText = "Streaming local response...";
+        // DISABLED FOR AliMinimumMessage: previous-turn execution receipts are
+        // neither copied nor injected into the next prompt.
         _currentTurnExecutionReceipts.Clear();
         EnsureActiveConversationHistoryItem();
-        if (!isRecoveryDecision)
-        {
-            ApplyFirstMessageTitleIfNeeded(text);
-        }
+        ApplyFirstMessageTitleIfNeeded(text);
 
-        var userMessageId = recoveryContext?.UserMessageId ?? $"msg_user_{Guid.NewGuid():N}";
-        var assistantMessageId = recoveryContext?.AssistantMessageId
-            ?? $"msg_asst_{Guid.NewGuid():N}";
+        var userMessageId = $"msg_user_{Guid.NewGuid():N}";
+        var assistantMessageId = $"msg_asst_{Guid.NewGuid():N}";
         var attachments = Attachments.Select(a => a.ToCoreAttachment()).ToList();
         var attachmentMetadata = Attachments.Select(ToStoredAttachmentMetadata).ToList();
-        ChatMessageViewModel? userMessage = null;
-        ChatMessageViewModel assistantMessage;
-        if (isRecoveryDecision)
-        {
-            assistantMessage = Messages.SingleOrDefault(message =>
-                    string.Equals(message.Id, assistantMessageId, StringComparison.Ordinal)
-                    && message.Role == ChatRole.Assistant)
-                ?? throw new InvalidOperationException(
-                    "The visible recovery response is no longer available in this chat.");
-            assistantMessage.IsResponseComplete = false;
-        }
-        else
-        {
-            userMessage = new ChatMessageViewModel(
-                userMessageId,
-                ChatRole.User,
-                text,
-                DateTimeOffset.UtcNow,
-                EvidenceStatus.Verified,
-                attachmentMetadata: attachmentMetadata.Count == 0 ? null : attachmentMetadata);
-            assistantMessage = new ChatMessageViewModel(
-                assistantMessageId,
-                ChatRole.Assistant,
-                string.Empty,
-                DateTimeOffset.UtcNow,
-                EvidenceStatus.Unknown,
-                sourceAttachmentCount: attachments.Count,
-                sourceInputOrigin: inputOrigin,
-                sourceVoiceMetadata: voiceMetadata,
-                sourceUserMessageId: userMessageId,
-                sourceQuestion: text,
-                isResponseComplete: false);
-        }
+        var userMessage = new ChatMessageViewModel(
+            userMessageId,
+            ChatRole.User,
+            text,
+            DateTimeOffset.UtcNow,
+            EvidenceStatus.Verified,
+            attachmentMetadata: attachmentMetadata.Count == 0 ? null : attachmentMetadata);
+        var assistantMessage = new ChatMessageViewModel(
+            assistantMessageId,
+            ChatRole.Assistant,
+            string.Empty,
+            DateTimeOffset.UtcNow,
+            EvidenceStatus.Unknown,
+            sourceAttachmentCount: attachments.Count,
+            sourceInputOrigin: inputOrigin,
+            sourceVoiceMetadata: voiceMetadata,
+            sourceUserMessageId: userMessageId,
+            sourceQuestion: text,
+            isResponseComplete: false);
 
         var history = Messages
-            .Where(message => !isRecoveryDecision
-                || !string.Equals(message.Id, assistantMessageId, StringComparison.Ordinal))
             .Select(message => message.ToCoreMessage())
             .ToList();
-        if (previousTurnExecutionReceipts.Length > 0)
-        {
-            history.Add(new ChatMessage(
-                $"execution_receipts_{Guid.NewGuid():N}",
-                ChatRole.System,
-                BuildPreviousTurnExecutionRecord(previousTurnExecutionReceipts),
-                DateTimeOffset.UtcNow,
-                EvidenceStatus.Verified));
-        }
-        if (userMessage is not null)
-        {
-            Messages.Add(userMessage);
-            Messages.Add(assistantMessage);
-        }
+        Messages.Add(userMessage);
+        Messages.Add(assistantMessage);
+        ClearSubmittedAttachments(Attachments.ToList());
 
         var responseCancellation = CancellationTokenSource.CreateLinkedTokenSource(
             _lifetimeCancellation.Token,
@@ -2719,56 +2636,18 @@ public sealed class MainWindowViewModel : ObservableObject
         var completed = false;
         var finalPublicationAcknowledged = false;
         var reachedOutputLimit = false;
-        var durableTurnPaused = false;
-        var pendingVisibleText = new StringBuilder();
         var answerStarted = false;
-        var lastVisibleTextFlush = DateTimeOffset.UtcNow;
-
-        async Task FlushVisibleTextAsync(bool force, bool pace)
-        {
-            if (pendingVisibleText.Length == 0)
-            {
-                return;
-            }
-
-            var now = DateTimeOffset.UtcNow;
-            if (!force
-                && pendingVisibleText.Length < StreamingTextFlushCharacters
-                && now - lastVisibleTextFlush < StreamingTextFlushInterval)
-            {
-                return;
-            }
-
-            assistantMessage.Text += pendingVisibleText.ToString();
-            pendingVisibleText.Clear();
-            lastVisibleTextFlush = now;
-            await Task.Yield();
-
-            if (pace && _activeResponse is not null && !_activeResponse.IsCancellationRequested)
-            {
-                await Task.Delay(StreamingTextPaceDelay, _activeResponse.Token).ConfigureAwait(true);
-            }
-        }
 
         try
         {
-            var responseStream = isRecoveryDecision
-                ? _services.Orchestrator.StreamRecoveryDecisionAsync(
-                    _conversationId,
-                    userMessageId,
-                    assistantMessageId,
-                    recoveryDecision!,
-                    history,
-                    attachments,
-                    responseCancellation.Token)
-                : _services.Orchestrator.StreamAnswerAsync(
-                    _conversationId,
-                    userMessageId,
-                    assistantMessageId,
-                    text,
-                    history,
-                    attachments,
-                    responseCancellation.Token);
+            var responseStream = _services.Orchestrator.StreamAnswerAsync(
+                _conversationId,
+                userMessageId,
+                assistantMessageId,
+                text,
+                history,
+                attachments,
+                responseCancellation.Token);
             await foreach (var chunk in responseStream)
             {
                 if (chunk.IsActivity)
@@ -2815,22 +2694,17 @@ public sealed class MainWindowViewModel : ObservableObject
 
                 assistantMessage.EvidenceStatus = chunk.EvidenceStatus;
                 reachedOutputLimit |= chunk.ReachedOutputLimit;
-                durableTurnPaused |= chunk.IsInterimPause;
                 QueueStreamingSpeech(streamingSpeech, chunk.Text);
                 var finalDelivery = chunk.FinalPublicationDelivery;
                 try
                 {
-                    foreach (var textSlice in SplitStreamingTextForDisplay(chunk.Text))
+                    if (!string.IsNullOrEmpty(chunk.Text))
                     {
-                        pendingVisibleText.Append(textSlice);
-                        await FlushVisibleTextAsync(
-                            force: pendingVisibleText.Length >= StreamingTextFlushCharacters,
-                            pace: true).ConfigureAwait(true);
+                        assistantMessage.Text += chunk.Text;
                     }
 
                     if (finalDelivery is not null)
                     {
-                        await FlushVisibleTextAsync(force: true, pace: false).ConfigureAwait(true);
                         assistantMessage.IsResponseComplete = true;
                         if (finalDelivery.RequiresPersistence)
                         {
@@ -2879,25 +2753,8 @@ public sealed class MainWindowViewModel : ObservableObject
                 }
             }
 
-            await FlushVisibleTextAsync(force: true, pace: false).ConfigureAwait(true);
             CompleteStreamingSpeechInput(streamingSpeech);
-            if (isRecoveryDecision)
-            {
-                ClearActiveRecoveryPrompt(recoveryContext!);
-            }
-
-            if (durableTurnPaused)
-            {
-                if (!_services.RuntimeController.IsUsingFallback)
-                {
-                    SetModelConnectionStatus("connected to model", MediaBrushes.LimeGreen);
-                }
-
-                StatusText = IsRecoveryDecisionRequired
-                    ? "Recovery decision required. Choose one of the two options below."
-                    : "Turn paused; send another message to continue.";
-            }
-            else if (LooksLikeRuntimeCommunicationFailure(assistantMessage.Text))
+            if (LooksLikeRuntimeCommunicationFailure(assistantMessage.Text))
             {
                 SetModelConnectionStatus("model offline", MediaBrushes.Red);
                 StatusText = "Local model communication failed.";
@@ -2919,34 +2776,22 @@ public sealed class MainWindowViewModel : ObservableObject
         }
         catch (OperationCanceledException)
         {
-            await FlushVisibleTextAsync(force: true, pace: false).ConfigureAwait(true);
-            if (!isRecoveryDecision)
-            {
-                assistantMessage.Text += "\n\nStopped by user.";
-            }
+            assistantMessage.Text += "\n\nStopped by user.";
             AddAgentActivity(new AssistantStreamChunk(
                 _conversationId,
                 userMessageId,
                 assistantMessageId,
-                isRecoveryDecision ? "Recovery decision stopped" : "Stopped by user",
+                "Stopped by user",
                 EvidenceStatus.Unknown,
                 IsActivity: true,
                 ActivityKind: AgentActivityKind.Warning,
-                ActivityDetail: isRecoveryDecision
-                    ? "The recovery choice remains available and no ordinary message was sent."
-                    : null));
+                ActivityDetail: null));
             CancelStreamingSpeech(streamingSpeech);
-            StatusText = isRecoveryDecision
-                ? "Recovery decision stopped; a decision is still required."
-                : "Response stopped.";
+            StatusText = "Response stopped.";
         }
         catch (HttpRequestException ex)
         {
-            await FlushVisibleTextAsync(force: true, pace: false).ConfigureAwait(true);
-            if (!isRecoveryDecision)
-            {
-                assistantMessage.Text += $"\n\nUnknown: local model communication failed. {ex.Message}";
-            }
+            assistantMessage.Text += $"\n\nUnknown: local model communication failed. {ex.Message}";
             AddAgentActivity(new AssistantStreamChunk(
                 _conversationId,
                 userMessageId,
@@ -2975,20 +2820,6 @@ public sealed class MainWindowViewModel : ObservableObject
                 _activeResponse = null;
             }
             IsBusy = false;
-            if (durableTurnPaused)
-            {
-                AttachmentStatus = Attachments.Count == 0
-                    ? IsRecoveryDecisionRequired
-                        ? "Recovery decision required. Choose an option above or cancel the turn."
-                        : "Turn paused. Send another message to continue."
-                    : IsRecoveryDecisionRequired
-                        ? $"Recovery decision required. Preserving {Attachments.Count} attachment(s)."
-                        : $"Turn paused. Preserving {Attachments.Count} attachment(s) for the next message.";
-            }
-            else if (completed || !isRecoveryDecision)
-            {
-                ClearTemporaryAttachments();
-            }
             if (ShouldSaveConversationAtTurnTeardown(finalPublicationAcknowledged))
             {
                 SaveActiveConversation();
@@ -5725,6 +5556,21 @@ public sealed class MainWindowViewModel : ObservableObject
             : $"{Attachments.Count} retained image attachment(s).";
     }
 
+    private void ClearSubmittedAttachments(
+        IReadOnlyCollection<ImageAttachmentViewModel> submittedAttachments)
+    {
+        foreach (var attachment in submittedAttachments)
+        {
+            DeleteAttachmentIfTemporary(attachment);
+            Attachments.Remove(attachment);
+        }
+
+        AttachmentStatus = Attachments.Count == 0
+            ? "AI can be wrong.  Always check answers against reliable sources."
+            : $"{Attachments.Count} image attachment(s). Temporary by default.";
+        RaiseCommandStates();
+    }
+
     private static void DeleteAttachmentIfTemporary(ImageAttachmentViewModel attachment)
     {
         if (attachment.RetainAfterSession)
@@ -6048,20 +5894,6 @@ public sealed class MainWindowViewModel : ObservableObject
         VoiceStatus = "Voice response streaming...";
         state.ConsumerTask = ConsumeStreamingSpeechAsync(state);
         return state;
-    }
-
-    private static IEnumerable<string> SplitStreamingTextForDisplay(string text)
-    {
-        if (string.IsNullOrEmpty(text))
-        {
-            yield break;
-        }
-
-        for (var offset = 0; offset < text.Length; offset += StreamingTextDisplaySliceCharacters)
-        {
-            var length = Math.Min(StreamingTextDisplaySliceCharacters, text.Length - offset);
-            yield return text.Substring(offset, length);
-        }
     }
 
     private static void QueueStreamingSpeech(StreamingSpeechState? state, string chunkText)

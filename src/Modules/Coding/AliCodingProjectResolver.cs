@@ -20,6 +20,7 @@ internal sealed class AliCodingProjectResolver(AliWorkstationFileAccess fileAcce
     public AliResolvedCodingProject ResolveExistingProject(string projectPath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectPath);
+        projectPath = NormalizeModelProjectPath(projectPath);
         var resolved = fileAccess.ResolvePhysicalFilePath(projectPath);
         var physicalTarget = resolved.PhysicalPath;
         if (Directory.Exists(physicalTarget))
@@ -44,6 +45,19 @@ internal sealed class AliCodingProjectResolver(AliWorkstationFileAccess fileAcce
             physicalTarget,
             resolved.MountRoot,
             Path.GetDirectoryName(physicalTarget)!);
+    }
+
+    private static string NormalizeModelProjectPath(string projectPath)
+    {
+        var normalized = projectPath.Trim().Trim('"', '\'', '`');
+        if (!Path.IsPathFullyQualified(normalized)
+            && !normalized.Contains('/')
+            && !normalized.Contains('\\'))
+        {
+            return $"Workspace/{normalized}";
+        }
+
+        return normalized.Replace('\\', '/');
     }
 
     public AliResolvedCodingTarget ResolveExistingTarget(string targetPath)

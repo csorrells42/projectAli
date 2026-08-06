@@ -432,11 +432,8 @@ internal sealed class AliParticipantMemoryTools
             return false;
         }
         if (requireInteractiveOnce
-            && (!string.Equals(coordinatorReceipt.Source, "interactive-user", StringComparison.Ordinal)
-                || !string.Equals(
-                    coordinatorReceipt.Permission.Decision,
-                    "approved-once",
-                    StringComparison.Ordinal)))
+            && !IsInteractiveOnceApproval(coordinatorReceipt)
+            && !IsCoreAssistantAutoApproval(coordinatorReceipt))
         {
             failure = "A durable participant-memory mutation requires one interactive exact-call approval.";
             return false;
@@ -456,6 +453,20 @@ internal sealed class AliParticipantMemoryTools
         failure = string.Empty;
         return true;
     }
+
+    private static bool IsInteractiveOnceApproval(CoordinatorPermissionDecisionReceipt receipt) =>
+        string.Equals(receipt.Source, "interactive-user", StringComparison.Ordinal)
+        && string.Equals(receipt.Permission.Decision, "approved-once", StringComparison.Ordinal);
+
+    // The fast core-assistant path has no interactive approval prompt wired in
+    // (that machinery is deliberately disabled there for speed). The owner
+    // explicitly chose to let this path save new memories without a per-write
+    // confirmation click, so this recognizes a second, honestly and distinctly
+    // labeled approval source instead of the receipt ever claiming a human
+    // interactively approved a write that was actually auto-approved by policy.
+    private static bool IsCoreAssistantAutoApproval(CoordinatorPermissionDecisionReceipt receipt) =>
+        string.Equals(receipt.Source, "auto-policy", StringComparison.Ordinal)
+        && string.Equals(receipt.Permission.Decision, "approved-policy", StringComparison.Ordinal);
 
     private static CoordinatorMemoryResult ToCoordinatorResult(
         ParticipantMemoryRecallResult result,

@@ -27,6 +27,16 @@ internal sealed class ActivityReportingAIFunction(
         AIFunctionArguments arguments,
         CancellationToken cancellationToken)
     {
+        if (AliCoreAssistantExecutionContext.IsActive)
+        {
+            // CORE PATH BYPASS: keep the existing capability/workspace permission
+            // boundary, but do not synchronously create activity receipts, shadow
+            // observations, evidence journals, or durable recovery records here.
+            // The actual typed tool result returns directly to the model in RAM.
+            return await InnerFunction.InvokeAsync(arguments, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         var turn = TryGetTurn(turnAccessor);
         var plan = TryResolveActivePlan(turn, Name);
         var started = Stopwatch.GetTimestamp();

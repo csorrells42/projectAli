@@ -43,8 +43,8 @@ internal sealed class AliAgentHarnessRunner : IDisposable
     // Exact repeated tool/argument plans are stopped by the connector; this high
     // ceiling remains only as a final finite-run safety boundary.
     internal const int MaximumToolIterations = int.MaxValue;
-    private const int CoreToolIterationsPerBurst = 4;
-    private static readonly IReadOnlySet<string> CoreRecoveryCSharpToolNames =
+    private const int MinimumMessageToolIterations = 65;
+    private static readonly IReadOnlySet<string> MinimumCSharpToolNames =
         new HashSet<string>(StringComparer.Ordinal)
         {
             AliCapabilityCatalog.CodingInspectProjectName,
@@ -57,7 +57,7 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             AliCapabilityCatalog.DotNetStopProjectName
         };
     private static readonly IReadOnlySet<string> CoreRecoveryToolNames =
-        new HashSet<string>(CoreRecoveryCSharpToolNames, StringComparer.Ordinal)
+        new HashSet<string>(MinimumCSharpToolNames, StringComparer.Ordinal)
         {
             AliCapabilityCatalog.SearchCurrentWebName,
             AliCapabilityCatalog.RecallUserMemoryName,
@@ -68,7 +68,6 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         {
             AliCapabilityCatalog.FileReadName,
             AliCapabilityCatalog.FileWriteName,
-            AliCapabilityCatalog.FileReplaceName,
             AliCapabilityCatalog.FileReplaceLinesName,
             AliCapabilityCatalog.RoslynAnalyzeProjectName,
             AliCapabilityCatalog.RoslynFormatProjectName,
@@ -408,7 +407,13 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             ? Math.Min(profile.ContextTokens, Math.Max(4_096, profile.ContextTokens / 4))
             : profile.ContextTokens;
         var harnessOutputTokens = coreAssistantPath
-            ? Math.Min(profile.OutputTokenLimit, Math.Clamp(harnessContextWindowTokens / 4, 512, 2_048))
+            // A single tool call's arguments (e.g. a full-file rewrite) must fit
+            // entirely within this budget or the streamed JSON gets cut off mid-value
+            // and the whole call fails to parse. 2,048 proved too tight for a
+            // multi-method C# file in practice; 4,096 keeps a real ceiling on
+            // latency while giving legitimate large single-call payloads room to
+            // actually finish instead of reliably failing and needing a retry.
+            ? Math.Min(profile.OutputTokenLimit, Math.Clamp(harnessContextWindowTokens / 4, 512, 4_096))
             : profile.OutputTokenLimit;
         if (harnessOutputTokens >= harnessContextWindowTokens)
         {
@@ -422,11 +427,12 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         {
             Name = _assistantProfile.AssistantName,
             Description = "Local personal assistant with memory, current web, local library, reminders, identity, clock, private work memory, and approved workstation file tools.",
-            // The outer core loop owns task completion and remains unbounded while
-            // work advances. Bound each Harness burst so repeated read-only calls
-            // return control to the completion gate instead of monopolizing a turn.
+            // AliMinimumMessage owns one continuous model/tool/result conversation.
+            // Sixty-four tool actions plus the initial model request lets substantial
+            // C# work finish without the artificial four-iteration handoff that
+            // previously returned an empty stream before a tool could run.
             MaximumIterationsPerRequest = coreAssistantPath
-                ? CoreToolIterationsPerBurst
+                ? MinimumMessageToolIterations
                 : MaximumToolIterations,
 #pragma warning disable MAAI001 // Agent Framework compaction controls are preview in Harness 1.15.
             // Local OpenAI-compatible runtimes can account Harmony/tool payloads much
@@ -483,6 +489,19 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             AIContextProviders = contextProviders,
             ChatOptions = chatOptions
         });
+        if (coreAssistantPath)
+        {
+            // CORE PATH BYPASS: provider outcome sidecars and framework lifecycle
+            // receipts remain compiled for later one-at-a-time reintegration, but
+            // neither belongs between a programming request and its model/tool loop.
+            // Capability and Workspace permission wrappers remain unchanged.
+            // Participant-memory reads are the one exception: they require an
+            // admitted permission receipt even on this path, so a narrow,
+            // tool-name-scoped middleware records one for exactly those two
+            // tools and is a no-op for everything else on this path.
+            return AliCoreMemoryReadReceiptMiddleware.WithMemoryReadReceipts(agent, _turnAccessor);
+        }
+
         agent = AliFrameworkProviderOutcomeMiddleware.WithOutcomeReporting(
             agent,
             _toolOutcomes,
@@ -501,10 +520,16 @@ internal sealed class AliAgentHarnessRunner : IDisposable
                 "Read one UTF-8 text file under Workspace."),
             BindCoreFileTool(provider, nameof(McpSourceFileTools.WriteCoreAsync),
                 AliCapabilityCatalog.FileWriteName,
-                "Write the complete contents of one UTF-8 Workspace text file. Existing files are intentionally overwritten."),
-            BindCoreFileTool(provider, nameof(McpSourceFileTools.ReplaceAsync),
-                AliCapabilityCatalog.FileReplaceName,
-                "Replace exact ordinal text in one existing Workspace file.")
+                "Create one new UTF-8 Workspace text file. This tool never overwrites an existing file; use file_access_replace_lines or file_access_append to modify existing source."),
+            BindCoreFileTool(provider, nameof(McpSourceFileTools.ReplaceLinesAsync),
+                AliCapabilityCatalog.FileReplaceLinesName,
+                "Replace an inclusive 1-based line range in one existing Workspace file with new content."),
+            BindCoreFileTool(provider, nameof(McpSourceFileTools.AppendAsync),
+                McpSourceFileTools.AppendToolName,
+                "Append supplied UTF-8 text directly to the end of one existing Workspace file without rewriting its existing contents."),
+            BindCoreFileTool(provider, nameof(McpSourceFileTools.LocateSolutionAsync),
+                McpSourceFileTools.LocateSolutionToolName,
+                "Find solution and C# project files and return Workspace-relative paths formatted for Ali's coding tools.")
         ];
     }
 
@@ -541,6 +566,9 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         + "Never claim that Workspace GUI launch is blocked by a sandbox. When dotnet_run_project is available and launch is requested, call it and report its exact result. Never claim build, test, or launch success unless the corresponding tool returned success for the final source. "
         + "Never pause merely because a tool or protocol response is imperfect; recover, choose another available tool, ask one necessary clarification, or explain the exact obstacle. "
         + "File operations must remain inside the approved workspace exposed by the file tools. "
+        + "Inside a regular double-quoted C# string literal, write a line break as the two characters backslash-n, never as an actual newline; only a verbatim string (@\"...\") may contain a real line break, and only with every quote doubled. "
+        + "To permanently save something for later, call mutate_participant_memory with Operation Add, the exact Text to remember, a short free-text Category, ClaimKind DirectStatement, EvidenceKind StatedDirectly, Visibility Private, Sensitivity Low unless the content is clearly sensitive, AttributionConfidence 1.0, and SpeakerParticipantReference/ReportedByParticipantReference set to the current user's exact reference from the roster returned by list_current_user_memories (call that first if you do not already have it this turn). Only report something as saved after mutate_participant_memory returns success; if it fails or you cannot resolve a participant reference, say so truthfully instead of claiming it was saved. "
+        + "When narrating multi-step work, put a blank line between each distinct step, plan point, or shift in topic; never run separate sentences like \"Let me do X. Now let me do Y.\" together with only a space, since that reads as one unreadable block. "
         + AliToolCatalog.TypoInterpretationInstruction;
 
     private static async Task<CoreAssistantCodingRequirements> ClassifyCoreCodingRequirementsAsync(
@@ -1166,6 +1194,53 @@ internal sealed class AliAgentHarnessRunner : IDisposable
     {
         var input = BuildInitialInput(history, userText, attachments).ToList();
         var dispatch = CaptureBoundModelDispatch();
+        var selectedNames = new HashSet<string>(MinimumCSharpToolNames, StringComparer.Ordinal)
+        {
+            AliCapabilityCatalog.SearchCurrentWebName,
+            AliCapabilityCatalog.RecallUserMemoryName,
+            AliCapabilityCatalog.ListCurrentUserMemoriesName,
+            AliCapabilityCatalog.MutateParticipantMemoryName
+        };
+        var activeTools = _startupAssistantTools
+            .Where(tool => tool is AIFunctionDeclaration function
+                && selectedNames.Contains(function.Name))
+            .Select(tool => tool is CapabilityPermissionProjectionAIFunction permissionProjection
+                ? (AITool)permissionProjection.ProjectWithoutApproval()
+                : tool)
+            .Concat(_coreFileTools)
+            .ToArray();
+        var agent = CreateAgent(
+            dispatch.ChatClient,
+            dispatch.Profile,
+            activeTools,
+            _orchestrationSettings,
+            _capabilityEnforcementProvider,
+            coreAssistantPath: true,
+            boundReasoningEffort: dispatch.GenerationSettingsBinding.ReasoningEffort);
+
+        using var coreExecutionScope = AliCoreAssistantExecutionContext.Enter();
+        return await new AliMinimumMessage()
+            .RunAsync(turn, agent, input, publishFinal, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+#if false
+    // DISABLED LEGACY CORE PATH
+    // Recovery decisions, receipt tracking, completion critics, shadow evidence,
+    // semantic reloads, focused-repair flags, and durable pause behavior are not
+    // compiled into Ali's active message route. Restore only one isolated feature
+    // at a time after AliMinimumMessage passes live speed and reliability tests.
+    private async Task<AgentHarnessRunResult> RunDisabledLegacyCoreAssistantAsync(
+        CoordinatorTurnContext turn,
+        string userText,
+        IReadOnlyList<RuntimeChatMessage> history,
+        IReadOnlyList<ChatAttachment> attachments,
+        Func<FinalAnswerPublication, CancellationToken,
+            ValueTask<FinalAnswerPublicationAcknowledgment>> publishFinal,
+        CancellationToken cancellationToken)
+    {
+        var input = BuildInitialInput(history, userText, attachments).ToList();
+        var dispatch = CaptureBoundModelDispatch();
         var requirements = await ClassifyCoreCodingRequirementsAsync(
                 dispatch.ChatClient,
                 input,
@@ -1208,7 +1283,7 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         var selectedNames = new HashSet<string>(StringComparer.Ordinal);
         if (requirements.RequiresWorkspaceWork)
         {
-            selectedNames.UnionWith(CoreRecoveryCSharpToolNames);
+            selectedNames.UnionWith(MinimumCSharpToolNames);
         }
         if (requirements.RequiresCurrentWeb)
         {
@@ -1222,7 +1297,7 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         var completionGate = new CoreAssistantCompletionGate();
         completionGate.Require(requirements);
 
-        var enableWorkspaceFiles = selectedNames.Overlaps(CoreRecoveryCSharpToolNames);
+        var enableWorkspaceFiles = selectedNames.Overlaps(MinimumCSharpToolNames);
         var activeTools = _startupAssistantTools
             .Where(tool => tool is AIFunctionDeclaration function
                 && selectedNames.Contains(function.Name))
@@ -1539,11 +1614,13 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         }
     }
 
+#endif
+
     private static string? RequiredCoreToolFor(CoreAssistantCompletionBlocker blocker) =>
         blocker.Code switch
         {
             "workspace-mutation-not-started" =>
-                AliCapabilityCatalog.FileReplaceName,
+                AliCapabilityCatalog.FileReplaceLinesName,
             "workspace-mutation-failed" =>
                 AliCapabilityCatalog.FileWriteName,
             "build-missing-or-stale" or "required-build-missing" =>
@@ -1563,9 +1640,9 @@ internal sealed class AliAgentHarnessRunner : IDisposable
             .ToHashSet(StringComparer.Ordinal);
         recoverySuiteLoaded = semanticSelection.RequiresAttention
             || selectedNames.Count == 0;
-        if (selectedNames.Overlaps(CoreRecoveryCSharpToolNames))
+        if (selectedNames.Overlaps(MinimumCSharpToolNames))
         {
-            selectedNames.UnionWith(CoreRecoveryCSharpToolNames);
+            selectedNames.UnionWith(MinimumCSharpToolNames);
         }
         if (recoverySuiteLoaded)
         {

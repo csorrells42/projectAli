@@ -1,3 +1,4 @@
+using System.Text;
 using Ali.Modules.Coordinator;
 using Ali.Modules.WorkstationFiles;
 
@@ -16,6 +17,9 @@ public sealed record McpSourceFileResult(
 /// </summary>
 internal sealed class McpSourceFileTools(AliWorkstationFileAccess fileAccess)
 {
+    internal const string AppendToolName = "file_access_append";
+    internal const string LocateSolutionToolName = "coding_locate_solution";
+
     public async Task<McpSourceFileResult> ReadAsync(
         string fileName,
         CancellationToken cancellationToken)
@@ -53,7 +57,7 @@ internal sealed class McpSourceFileTools(AliWorkstationFileAccess fileAccess)
                 return new McpSourceFileResult(
                     false,
                     normalizedPath,
-                    "The file already exists. Set overwrite=true only after the user approves replacing it.");
+                    "The file already exists. Modify it with file_access_replace_lines or file_access_append instead of rewriting the whole file.");
             }
 
             if (exists
@@ -89,7 +93,7 @@ internal sealed class McpSourceFileTools(AliWorkstationFileAccess fileAccess)
         string fileName,
         string content,
         CancellationToken cancellationToken) =>
-        WriteAsync(fileName, content, overwrite: true, cancellationToken);
+        WriteAsync(fileName, content, overwrite: false, cancellationToken);
 
     public async Task<McpSourceFileResult> ReplaceAsync(
         string fileName,
@@ -143,6 +147,172 @@ internal sealed class McpSourceFileTools(AliWorkstationFileAccess fileAccess)
         catch (Exception ex) when (IsExpected(ex))
         {
             return new McpSourceFileResult(false, normalizedPath, ex.Message);
+        }
+    }
+
+    public async Task<McpSourceFileResult> ReplaceLinesAsync(
+        string fileName,
+        int startLine,
+        int endLine,
+        string newContent,
+        CancellationToken cancellationToken)
+    {
+        var normalizedPath = fileName;
+        try
+        {
+            normalizedPath = NormalizePath(AliCapabilityCatalog.FileReplaceLinesName, fileName);
+            var content = await fileAccess.Store.ReadAsync(normalizedPath, cancellationToken)
+                .ConfigureAwait(false);
+            if (content is null)
+            {
+                return new McpSourceFileResult(false, normalizedPath, "The file does not exist.");
+            }
+
+            var newline = content.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+            var normalizedContent = content
+                .Replace("\r\n", "\n", StringComparison.Ordinal)
+                .Replace('\r', '\n');
+            var hadTrailingNewline = normalizedContent.EndsWith('\n');
+            var lines = normalizedContent.Split('\n').ToList();
+            if (hadTrailingNewline)
+            {
+                lines.RemoveAt(lines.Count - 1);
+            }
+
+            if (startLine < 1 || endLine < startLine || endLine > lines.Count)
+            {
+                return new McpSourceFileResult(
+                    false,
+                    normalizedPath,
+                    $"Line range {startLine}-{endLine} is outside the file's 1-{lines.Count} line range.");
+            }
+
+            var replacement = (newContent ?? string.Empty)
+                .Replace("\r\n", "\n", StringComparison.Ordinal)
+                .Replace('\r', '\n');
+            var replacementLines = replacement.Length == 0
+                ? []
+                : replacement.Split('\n').ToList();
+            if (replacementLines.Count > 0 && replacement.EndsWith('\n'))
+            {
+                replacementLines.RemoveAt(replacementLines.Count - 1);
+            }
+
+            var replacedLineCount = endLine - startLine + 1;
+            lines.RemoveRange(startLine - 1, replacedLineCount);
+            lines.InsertRange(startLine - 1, replacementLines);
+            var updated = string.Join(newline, lines);
+            if (hadTrailingNewline)
+            {
+                updated += newline;
+            }
+
+            await fileAccess.Store.WriteAsync(normalizedPath, updated, cancellationToken)
+                .ConfigureAwait(false);
+            return new McpSourceFileResult(
+                true,
+                normalizedPath,
+                $"Replaced lines {startLine}-{endLine} successfully.",
+                ReplacementCount: replacedLineCount);
+        }
+        catch (Exception ex) when (IsExpected(ex))
+        {
+            return new McpSourceFileResult(false, normalizedPath, ex.Message);
+        }
+    }
+
+    public async Task<McpSourceFileResult> AppendAsync(
+        string fileName,
+        string content,
+        CancellationToken cancellationToken)
+    {
+        var normalizedPath = fileName;
+        try
+        {
+            normalizedPath = NormalizePath(AliCapabilityCatalog.FileWriteName, fileName);
+            var resolved = fileAccess.ResolvePhysicalFilePath(normalizedPath);
+            if (!File.Exists(resolved.PhysicalPath))
+            {
+                return new McpSourceFileResult(false, normalizedPath, "The file does not exist.");
+            }
+
+            if ((File.GetAttributes(resolved.PhysicalPath) & FileAttributes.ReparsePoint) != 0)
+            {
+                return new McpSourceFileResult(false, normalizedPath, "Refused to append through a reparse point.");
+            }
+
+            await using var stream = new FileStream(
+                resolved.PhysicalPath,
+                FileMode.Append,
+                FileAccess.Write,
+                FileShare.Read,
+                bufferSize: 4096,
+                FileOptions.Asynchronous);
+            await using var writer = new StreamWriter(stream, new UTF8Encoding(false));
+            await writer.WriteAsync((content ?? string.Empty).AsMemory(), cancellationToken)
+                .ConfigureAwait(false);
+            await writer.FlushAsync(cancellationToken).ConfigureAwait(false);
+            return new McpSourceFileResult(
+                true,
+                normalizedPath,
+                $"Appended {(content ?? string.Empty).Length} character(s) successfully.");
+        }
+        catch (Exception ex) when (IsExpected(ex))
+        {
+            return new McpSourceFileResult(false, normalizedPath, ex.Message);
+        }
+    }
+
+    public Task<McpSourceFileResult> LocateSolutionAsync(
+        string? nameContains,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var matches = new List<string>();
+            var options = new EnumerationOptions
+            {
+                RecurseSubdirectories = true,
+                IgnoreInaccessible = true,
+                AttributesToSkip = FileAttributes.ReparsePoint | FileAttributes.System
+            };
+            foreach (var mount in fileAccess.Mounts)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                foreach (var physicalPath in Directory.EnumerateFiles(mount.RootPath, "*", options))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var extension = Path.GetExtension(physicalPath);
+                    if (!extension.Equals(".sln", StringComparison.OrdinalIgnoreCase)
+                        && !extension.Equals(".slnx", StringComparison.OrdinalIgnoreCase)
+                        && !extension.Equals(".csproj", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    var relative = Path.GetRelativePath(mount.RootPath, physicalPath)
+                        .Replace('\\', '/');
+                    var workspacePath = $"{mount.Name}/{relative}";
+                    if (string.IsNullOrWhiteSpace(nameContains)
+                        || workspacePath.Contains(nameContains.Trim(), StringComparison.OrdinalIgnoreCase))
+                    {
+                        matches.Add(workspacePath);
+                    }
+                }
+            }
+
+            matches.Sort(StringComparer.OrdinalIgnoreCase);
+            return Task.FromResult(matches.Count == 0
+                ? new McpSourceFileResult(false, string.Empty, "No matching solution or C# project was found in the configured workspace.")
+                : new McpSourceFileResult(
+                    true,
+                    matches[0],
+                    $"Found {matches.Count} workspace-formatted solution/project path(s).",
+                    string.Join(Environment.NewLine, matches)));
+        }
+        catch (Exception ex) when (IsExpected(ex))
+        {
+            return Task.FromResult(new McpSourceFileResult(false, string.Empty, ex.Message));
         }
     }
 

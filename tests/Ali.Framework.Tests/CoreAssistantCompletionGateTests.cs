@@ -1,6 +1,7 @@
 using Ali.Modules.Coding;
 using Ali.Modules.Coding.Engineering;
 using Ali.Modules.Coordinator;
+using Ali.Modules.Mcp;
 using Microsoft.Extensions.AI;
 using System.Text.Json;
 
@@ -43,11 +44,17 @@ public sealed class CoreAssistantCompletionGateTests
     public void SourceChangeAfterPassingBuild_RequiresFreshBuild()
     {
         var gate = CreateGate();
-        Observe(gate, "write-1", AliCapabilityCatalog.FileWriteName, "File written.");
+        Observe(gate, "write-1", AliCapabilityCatalog.FileWriteName, SourceWriteResult(), SourceFileArguments());
         Observe(gate, "build-1", AliCapabilityCatalog.DotNetBuildName, Build(true, "Build succeeded."));
-        Assert.False(gate.TryGetBlocker(out _));
 
-        Observe(gate, "write-2", AliCapabilityCatalog.FileReplaceName, "File replaced.");
+        // A passing build alone does not clear completion: by design the gate also
+        // requires a fresh launch after any edit. AliMinimumMessage deliberately
+        // does not enforce this specific sub-check live (see its SkippedBlockerCode)
+        // to avoid forcing a run nobody asked for, but the raw gate still reports it.
+        Assert.True(gate.TryGetBlocker(out var afterBuildOnly));
+        Assert.Equal("run-missing-or-stale", afterBuildOnly.Code);
+
+        Observe(gate, "write-2", AliCapabilityCatalog.FileReplaceName, SourceWriteResult(), SourceFileArguments());
 
         Assert.True(gate.TryGetBlocker(out var blocker));
         Assert.Contains("current build", blocker.ContinuationInstruction, StringComparison.OrdinalIgnoreCase);
@@ -105,7 +112,7 @@ public sealed class CoreAssistantCompletionGateTests
     public void SourceChangeAfterSuccessfulRun_RequiresFreshBuildAndLaunch()
     {
         var gate = CreateGate();
-        Observe(gate, "write-1", AliCapabilityCatalog.FileWriteName, "File written.");
+        Observe(gate, "write-1", AliCapabilityCatalog.FileWriteName, SourceWriteResult(), SourceFileArguments());
         Observe(gate, "build-1", AliCapabilityCatalog.DotNetBuildName, Build(true, "Build succeeded."));
         Observe(
             gate,
@@ -115,7 +122,7 @@ public sealed class CoreAssistantCompletionGateTests
                 new DotNetRunResult(true, "App.csproj", "Started.", "App.exe", 42)));
         Assert.False(gate.TryGetBlocker(out _));
 
-        Observe(gate, "write-2", AliCapabilityCatalog.FileReplaceName, "File replaced.");
+        Observe(gate, "write-2", AliCapabilityCatalog.FileReplaceName, SourceWriteResult(), SourceFileArguments());
         Observe(gate, "build-2", AliCapabilityCatalog.DotNetBuildName, Build(true, "Build succeeded."));
 
         Assert.True(gate.TryGetBlocker(out var blocker));
@@ -152,7 +159,7 @@ public sealed class CoreAssistantCompletionGateTests
         Assert.True(gate.TryGetBlocker(out var second));
         Assert.Equal(first.Fingerprint, second.Fingerprint);
 
-        Observe(gate, "write-1", AliCapabilityCatalog.FileWriteName, "File written.");
+        Observe(gate, "write-1", AliCapabilityCatalog.FileWriteName, SourceWriteResult(), SourceFileArguments());
         Assert.True(gate.TryGetBlocker(out var afterProgress));
         Assert.NotEqual(first.Fingerprint, afterProgress.Fingerprint);
     }
@@ -163,11 +170,19 @@ public sealed class CoreAssistantCompletionGateTests
         CoreAssistantCompletionGate gate,
         string callId,
         string toolName,
-        object result)
+        object result,
+        IDictionary<string, object?>? arguments = null)
     {
-        gate.Track(new FunctionCallContent(callId, toolName));
+        gate.Track(new FunctionCallContent(callId, toolName, arguments));
         gate.Observe(new FunctionResultContent(callId, result));
     }
+
+    private static IDictionary<string, object?> SourceFileArguments(string fileName = "Program.cs") =>
+        new Dictionary<string, object?> { ["fileName"] = fileName };
+
+    private static JsonElement SourceWriteResult(string fileName = "Program.cs") =>
+        JsonSerializer.SerializeToElement(
+            new McpSourceFileResult(true, fileName, "File written successfully."));
 
     private static DotNetBuildResult Build(bool success, string summary) =>
         new(
