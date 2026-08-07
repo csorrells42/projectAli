@@ -30,13 +30,13 @@ public sealed class MainWindowConversationPersistenceTests
     [Theory]
     [InlineData(true, false)]
     [InlineData(false, true)]
-    public void TurnTeardown_SavesOnlyWhenFinalPublicationWasNotAcknowledged(
-        bool finalPublicationAcknowledged,
+    public void TurnTeardown_SavesUnlessFinalPublicationWasAlreadyPersisted(
+        bool finalPublicationPersisted,
         bool expectedSave)
     {
         Assert.Equal(
             expectedSave,
-            MainWindowViewModel.ShouldSaveConversationAtTurnTeardown(finalPublicationAcknowledged));
+            MainWindowViewModel.ShouldSaveConversationAtTurnTeardown(finalPublicationPersisted));
     }
 
     [Theory]

@@ -2701,7 +2701,7 @@ public sealed class MainWindowViewModel : ObservableObject
         _activeResponse = responseCancellation;
         var streamingSpeech = StartStreamingSpeechIfNeeded(inputOrigin);
         var completed = false;
-        var finalPublicationAcknowledged = false;
+        var finalPublicationPersisted = false;
         var reachedOutputLimit = false;
         var answerStarted = false;
 
@@ -2772,6 +2772,8 @@ public sealed class MainWindowViewModel : ObservableObject
 
                     if (finalDelivery is not null)
                     {
+                        assistantMessage.AppendResponseText(
+                            finalDelivery.GetUnpublishedSuffix(assistantMessage.Text));
                         assistantMessage.IsResponseComplete = true;
                         if (finalDelivery.RequiresPersistence)
                         {
@@ -2798,6 +2800,7 @@ public sealed class MainWindowViewModel : ObservableObject
                                 saved.ConversationId,
                                 persisted.MessageId,
                                 persisted.Text);
+                            finalPublicationPersisted = true;
                         }
                         else
                         {
@@ -2806,8 +2809,6 @@ public sealed class MainWindowViewModel : ObservableObject
                                 assistantMessage.Id,
                                 assistantMessage.Text);
                         }
-
-                        finalPublicationAcknowledged = true;
                     }
                 }
                 catch
@@ -2907,7 +2908,7 @@ public sealed class MainWindowViewModel : ObservableObject
                 _activeResponse = null;
             }
             IsBusy = false;
-            if (ShouldSaveConversationAtTurnTeardown(finalPublicationAcknowledged))
+            if (ShouldSaveConversationAtTurnTeardown(finalPublicationPersisted))
             {
                 SaveActiveConversation();
             }
@@ -3472,9 +3473,9 @@ public sealed class MainWindowViewModel : ObservableObject
         return saved;
     }
 
-    internal static bool ShouldSaveConversationAtTurnTeardown(bool finalPublicationAcknowledged)
+    internal static bool ShouldSaveConversationAtTurnTeardown(bool finalPublicationPersisted)
     {
-        return !finalPublicationAcknowledged;
+        return !finalPublicationPersisted;
     }
 
     private void RefreshMemoryReminders()

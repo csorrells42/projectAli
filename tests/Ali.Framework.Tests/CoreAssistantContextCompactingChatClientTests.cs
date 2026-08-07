@@ -48,6 +48,32 @@ public sealed class CoreAssistantContextCompactingChatClientTests
     }
 
     [Fact]
+    public void LongConversationCompaction_KeepsCurrentUserRequestLast()
+    {
+        var client = new CoreAssistantContextCompactingChatClient(
+            new CharByCharStreamingClient("unused"));
+        var messages = Enumerable.Range(1, 16)
+            .Select(index => new AIChatMessage(
+                index % 2 == 0 ? AIChatRole.Assistant : AIChatRole.User,
+                $"message-{index}"))
+            .Append(new AIChatMessage(AIChatRole.User, "current-request"))
+            .ToArray();
+
+        var compacted = client.CompactForTurn(messages);
+        var nonSystem = compacted
+            .Where(message => message.Role != AIChatRole.System)
+            .ToArray();
+
+        Assert.Equal(13, nonSystem.Length);
+        Assert.Equal(
+            Enumerable.Range(5, 12)
+                .Select(index => $"message-{index}")
+                .Append("current-request"),
+            nonSystem.Select(message => message.Text));
+        Assert.Equal("current-request", nonSystem[^1].Text);
+    }
+
+    [Fact]
     public async Task QwenToolEnvelope_StreamedCharacterByCharacter_IsPromotedNotLeaked()
     {
         const string raw = "<tools>{\"name\":\"read_file\",\"arguments\":{\"relative_path\":\"foo2/App.xaml\",\"start_line\":0,\"end_line\":-1}}</tools>";

@@ -171,6 +171,18 @@ internal sealed class FinalAnswerPublicationDelivery
     internal bool RequiresPersistence =>
         _requiredDisposition == FinalAnswerPublicationDisposition.PersistedByConversationStore;
 
+    internal string GetUnpublishedSuffix(string streamedText)
+    {
+        ArgumentNullException.ThrowIfNull(streamedText);
+        if (!Publication.AnswerText.StartsWith(streamedText, StringComparison.Ordinal))
+        {
+            throw new InvalidDataException(
+                "The streamed assistant text does not match the final publication prefix.");
+        }
+
+        return Publication.AnswerText[streamedText.Length..];
+    }
+
     internal async ValueTask<FinalAnswerPublicationAcknowledgment> WaitAsync(
         CancellationToken cancellationToken) =>
         await _completion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);

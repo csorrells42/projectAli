@@ -468,7 +468,7 @@ internal sealed class CoreAssistantContextCompactingChatClient(IChatClient inner
         return focused;
     }
 
-    private IReadOnlyList<ChatMessage> CompactForTurn(IEnumerable<ChatMessage> messages)
+    internal IReadOnlyList<ChatMessage> CompactForTurn(IEnumerable<ChatMessage> messages)
     {
         ArgumentNullException.ThrowIfNull(messages);
         var source = messages.ToList();
@@ -538,14 +538,30 @@ internal sealed class CoreAssistantContextCompactingChatClient(IChatClient inner
         ChatMessage? anchor)
     {
         var effectiveAnchor = anchor ?? nonSystem[0];
-        var retained = new List<ChatMessage>(MaximumRetainedNonSystemMessages + 1)
+        var anchorIndex = -1;
+        for (var index = 0; index < nonSystem.Count; index++)
         {
-            effectiveAnchor
-        };
-        retained.AddRange(nonSystem
-            .TakeLast(MaximumRetainedNonSystemMessages)
-            .Where(message => !SameMessage(message, effectiveAnchor)));
-        return retained;
+            if (SameMessage(nonSystem[index], effectiveAnchor))
+            {
+                anchorIndex = index;
+                break;
+            }
+        }
+
+        var capacity = MaximumRetainedNonSystemMessages + 1;
+        var firstTailIndex = Math.Max(0, nonSystem.Count - capacity);
+        var retainedIndices = Enumerable.Range(firstTailIndex, nonSystem.Count - firstTailIndex)
+            .ToHashSet();
+        if (anchorIndex >= 0 && !retainedIndices.Contains(anchorIndex))
+        {
+            retainedIndices.Remove(retainedIndices.Min());
+            retainedIndices.Add(anchorIndex);
+        }
+
+        return retainedIndices
+            .Order()
+            .Select(index => nonSystem[index])
+            .ToList();
     }
 
     private static bool SameMessage(ChatMessage left, ChatMessage right) =>

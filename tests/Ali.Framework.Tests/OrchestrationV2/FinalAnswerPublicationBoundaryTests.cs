@@ -161,6 +161,24 @@ public sealed class FinalAnswerPublicationBoundaryTests
     }
 
     [Fact]
+    public void Delivery_ReturnsOnlyFinalTextNotAlreadyStreamed()
+    {
+        const string streamed = "Verified answer.";
+        const string final = "Verified answer.\n\nSources checked:\n- source";
+        var publication = Publication() with
+        {
+            AnswerText = final,
+            AnswerDigest = TurnStateIntegrity.Digest(final)
+        };
+        var delivery = new FinalAnswerPublicationDelivery(publication);
+
+        Assert.Equal(final[streamed.Length..], delivery.GetUnpublishedSuffix(streamed));
+        Assert.Equal(string.Empty, delivery.GetUnpublishedSuffix(final));
+        Assert.Throws<InvalidDataException>(() =>
+            delivery.GetUnpublishedSuffix("different"));
+    }
+
+    [Fact]
     public void Renderer_ProducesOneBoundedDeduplicatedSourceAppendix()
     {
         var now = DateTimeOffset.UtcNow;
