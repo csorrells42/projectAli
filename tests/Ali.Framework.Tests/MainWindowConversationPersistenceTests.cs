@@ -5,7 +5,7 @@ namespace Ali.Framework.Tests;
 public sealed class MainWindowConversationPersistenceTests
 {
     [Fact]
-    public void TurnHistory_IsNotForwardedIntoANewModelRun()
+    public void CompletedVisibleTurnHistory_IsForwardedIntoANewModelRun()
     {
         var viewModel = File.ReadAllText(FindRepositoryFile(
             "src",
@@ -14,11 +14,15 @@ public sealed class MainWindowConversationPersistenceTests
             "MainWindowViewModel.cs"));
 
         Assert.Contains(
-            "IReadOnlyList<ChatMessage> history = Array.Empty<ChatMessage>();",
+            ".Where(message => message.IsResponseComplete",
+            viewModel,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            ".Select(message => message.ToCoreMessage())",
             viewModel,
             StringComparison.Ordinal);
         Assert.DoesNotContain(
-            ".Select(message => message.ToCoreMessage())",
+            "IReadOnlyList<ChatMessage> history = Array.Empty<ChatMessage>();",
             viewModel,
             StringComparison.Ordinal);
     }

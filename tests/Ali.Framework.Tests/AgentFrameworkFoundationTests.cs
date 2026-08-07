@@ -115,7 +115,7 @@ public sealed class AgentFrameworkFoundationTests
     }
 
     [Fact]
-    public void CoreCoding_RemovesSerenaOnboardingButKeepsCodingTools()
+    public void CoreCoding_RemovesSerenaOnboardingAndProjectSwitchingButKeepsCodingTools()
     {
         var onboarding = Microsoft.Extensions.AI.AIFunctionFactory.Create(
             () => "setup",
@@ -125,9 +125,13 @@ public sealed class AgentFrameworkFoundationTests
             (string relative_path) => relative_path,
             "replace_symbol_body",
             "Edit a source symbol.");
+        var activateProject = Microsoft.Extensions.AI.AIFunctionFactory.Create(
+            (string project) => project,
+            "activate_project",
+            "Switch Serena projects.");
 
         var filtered = Ali.Modules.Coordinator.AliAgentHarnessRunner
-            .FilterSerenaToolsForCoreCoding([onboarding, editFile]);
+            .FilterSerenaToolsForCoreCoding([onboarding, activateProject, editFile]);
 
         var retained = Assert.Single(filtered);
         Assert.Equal("replace_symbol_body", Assert.IsAssignableFrom<Microsoft.Extensions.AI.AIFunctionDeclaration>(retained).Name);

@@ -64,7 +64,11 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         ArgumentNullException.ThrowIfNull(tools);
         return tools
             .Where(tool => tool is not AIFunctionDeclaration function
-                || !string.Equals(function.Name, "onboarding", StringComparison.Ordinal))
+                || (!string.Equals(function.Name, "onboarding", StringComparison.Ordinal)
+                    && !string.Equals(
+                        function.Name,
+                        AliSerenaWorkspaceGuardMiddleware.ActivateProjectToolName,
+                        StringComparison.Ordinal)))
             .ToArray();
     }
 
@@ -599,6 +603,7 @@ internal sealed class AliAgentHarnessRunner : IDisposable
         + "Before answering, account for every explicitly requested operation and report each operation's verified success, failure, or exact unresolved obstacle. "
         + "Serena is your preferred programming toolset when it is available; use Serena's native project, memory, semantic retrieval, editing, refactoring, diagnostics, and shell tools directly for coding work. If Serena's tools are not offered to you this turn, it is unavailable right now and you have been given Ali's own built-in file tools instead -- use those normally rather than claiming coding is impossible. "
         + "The Workspace project is already activated for you at the start of every turn; never call activate_project again during a turn, even for a request that names a specific subfolder like \"foo2\" -- activate_project switches to an entirely different top-level project by exact name, it does not navigate into a subfolder of the current one, and guessing a bare name risks activating an unrelated project that happens to share it. To work inside a subfolder, use ordinary relative paths (for example \"foo2/MainWindow.xaml\") with your normal file, search, and symbol tools instead. "
+        + "When the user asks for a genuinely new app, project, or solution, create it in a new non-existing child directory under Workspace. Never reuse, clear, replace, or scaffold over an existing project directory; if the requested child directory already exists, report that exact conflict and wait for a different name. "
         + "For creation, repair, build, test, launch, or stop requests, perform the requested Workspace operations with whichever coding tools are actually available to you this turn; pasted source or instructions are not a substitute for creating or changing the requested files. "
         + "Keep every source, XAML, project, build, and run operation inside the active Workspace project. Complete the requested multi-file implementation before attempting its first build. "
         + "Use the newest installed supported .NET SDK for new projects. Never downgrade an existing TargetFramework unless the human explicitly requested that older compatibility target. "

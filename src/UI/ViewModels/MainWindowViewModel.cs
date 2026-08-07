@@ -2682,10 +2682,15 @@ public sealed class MainWindowViewModel : ObservableObject
             sourceQuestion: text,
             isResponseComplete: false);
 
-        // Every submitted instruction is authoritative and fire-and-forget.
-        // Keep prior messages in the UI, but never let an interrupted objective
-        // leak into a later request such as "hello" or a different task.
-        IReadOnlyList<ChatMessage> history = Array.Empty<ChatMessage>();
+        // Preserve the visible completed conversation so a fresh model request
+        // still knows what the user and Ali just discussed. Internal tool calls,
+        // tool results, execution sessions, and interrupted commands are not UI
+        // messages and are therefore never replayed here.
+        var history = Messages
+            .Where(message => message.IsResponseComplete
+                && !string.IsNullOrWhiteSpace(message.Text))
+            .Select(message => message.ToCoreMessage())
+            .ToList();
         Messages.Add(userMessage);
         Messages.Add(assistantMessage);
         ClearSubmittedAttachments(Attachments.ToList());
